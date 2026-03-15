@@ -151,8 +151,9 @@ Los resultados se documentarán en el sitio.
 
 **Nota histórica:** La lógica de este sistema sobrevivió 20 años desde su
 versión original en VB6. Las reglas de negocio proporcionadas a Claude las
-diseñé en 2006 pararesolver el problema, así que estars reglas de negocio
-fueron adaptadas a propmpts por Claude.
+diseñé en 2006 para resolver el problema, así que estas reglas de negocio
+fueron adaptadas a prompts por Claude. La revisión se hará según mi tiempo libre.
+De momento es AS IS.
 
 El problema de negocio que resuelve — la trazabilidad sin posibilidad de
 manipulación departamental — sigue siendo igual de relevante en 2026 que en 2006.
