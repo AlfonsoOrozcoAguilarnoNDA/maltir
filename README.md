@@ -15,11 +15,12 @@ en proyectos divididos en chunks secuenciales.
 
 ## 🧬 Origen del Proyecto
 
-La lógica de negocio especificada en este sistema fue diseñada por
-**Claude Sonnet 4.6** el 15 de marzo de 2026, en colaboración con el autor,
-a partir de un sistema de cotizaciones **real** desarrollado originalmente
-en **Visual Basic 6.0 + Microsoft SQL Server 2000** en el año **2006**
-para una empresa transnacional mexicana.
+La lógica de negocio especificada en este sistema fue diseñada por el autor en 2006.
+En 2026 se le pide a **Claude Sonnet 4.6** el 15 de marzo de 2026, volverlo prompts
+en colaboración con el autor, a partir de un sistema de cotizaciones **real**
+desarrollado originalmente en **Visual Basic 6.0 + Microsoft SQL Server 2000**
+en el año **2006** para una empresa transnacional mexicana. Estuvo en operación
+por lo menos los cuatro años que estuve allí.
 
 La versión original de 2006 resolvía un problema de negocio crítico:
 en procesos de compras con múltiples departamentos y proveedores,
@@ -49,6 +50,7 @@ Evaluar si **Kimi 2.5 web** puede:
 3. Generar código PHP procedural funcional y coherente entre módulos
 4. Implementar lógica de negocio no trivial con restricciones irreversibles
 
+Se haran cambios necesarios encódigo y se documentaran en vibecodingmexico.com
 ---
 
 ## ⚙️ Especificaciones Técnicas
@@ -148,9 +150,12 @@ un prompt maestro que no se repite en cada chunk?
 Los resultados se documentarán en el sitio.
 
 **Nota histórica:** La lógica de este sistema sobrevivió 20 años desde su
-versión original en VB6. El problema de negocio que resuelve — la
-trazabilidad sin posibilidad de manipulación departamental — sigue siendo
-igual de relevante en 2026 que en 2006.
+versión original en VB6. Las reglas de negocio proporcionadas a Claude las
+diseñé en 2006 pararesolver el problema, así que estars reglas de negocio
+fueron adaptadas a propmpts por Claude.
+
+El problema de negocio que resuelve — la trazabilidad sin posibilidad de
+manipulación departamental — sigue siendo igual de relevante en 2026 que en 2006.
 
 ---
 
