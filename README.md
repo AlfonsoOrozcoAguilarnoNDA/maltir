@@ -133,6 +133,8 @@ y que **ningún usuario operativo puede modificar**:
 - [ ] Posibles puntos de control adicionales según normativas laborales
   o leyes aplicables — esta es una prueba de concepto
 
+1 - De momento hay un parpadeo en las altas de catálogos. Probablente  esasunto de editar un FADE.
+
 ---
 
 ## 🧪 Notas del Autor (Bitácora de Vibe Coding)
@@ -170,3 +172,19 @@ Este proyecto se distribuye bajo la licencia **LGPL 2.1**.
 
 - **Sitio Web:** [vibecodingmexico.com](https://vibecodingmexico.com)
 - **Facebook:** [Alfonso Orozco Aguilar](https://www.facebook.com/alfonso.orozcoaguilar)
+
+- Visuales del Laboratorio 2 (Kimi 2.5)
+Catálogo de Unidades de Medida
+![Catálogo de Unidades](pantallaunidades.png)
+
+Catálogo de Incoterms 2020
+![Catálogo de Incoterms](pantallaincoterms.png)
+
+Catálogo de Proveedores
+![Catálogo de Proveedores](pantallaproveedores.png)
+
+Catálogo de Artículos (Prueba Kilogramo de Luz)
+![Catálogo de Artículos](pantallaarticulos.png)
+
+Pantalla de Acceso (Login)
+![Pantalla de Login](pantallalogin.png)
