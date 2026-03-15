@@ -173,7 +173,7 @@ Este proyecto se distribuye bajo la licencia **LGPL 2.1**.
 - **Sitio Web:** [vibecodingmexico.com](https://vibecodingmexico.com)
 - **Facebook:** [Alfonso Orozco Aguilar](https://www.facebook.com/alfonso.orozcoaguilar)
 
-- Visuales del Laboratorio 2 (Kimi 2.5)
+## Visuales del Laboratorio 2 (Kimi 2.5)
 Catálogo de Unidades de Medida
 ![Catálogo de Unidades](pantallaunidades.png)
 
