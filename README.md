@@ -136,8 +136,8 @@ y que **ningún usuario operativo puede modificar**:
 - [ ] Posibles puntos de control adicionales según normativas laborales
   o leyes aplicables — esta es una prueba de concepto
 
-1 - De momento hay un parpadeo en las altas de catálogos. Probablente  esasunto de editar un FADE.
-2 - Cerrar Cotización tiene el mismo parpadeo en el modal
+* 1 - De momento hay un parpadeo en las altas de catálogos. Probablente  es asunto de editar un FADE.
+* 2 - Cerrar Cotización tiene el mismo parpadeo en el modal
 
 ---
 ## Observación sobre crear cotización
