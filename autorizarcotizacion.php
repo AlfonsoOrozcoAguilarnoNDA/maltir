@@ -16,7 +16,6 @@
  * * "Los datos no mienten, las personas sí."
  */
 ?>
-
 <?php require_once 'headerkimi.php'; ?>
 
 <link rel="stylesheet" href="compraskimi.css">
@@ -26,54 +25,79 @@
 <?php
 $mensaje = '';
 $tipo_mensaje = '';
+$usuario_sanitizado = mysqli_real_escape_string($link, $session_usuario);
 
 // Procesar POST de autorización
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirmar_autorizacion'])) {
     $idRespuesta = intval($_POST['idRespuesta']);
     $nueva_cantidad = floatval($_POST['cantidad_autorizada']);
     
-    // Obtener datos actuales de la respuesta
-    $sql = "SELECT r.*, d.cantidad_solicitada, d.idDetalle 
-            FROM respuesta_cotizacion r
-            JOIN cotizaciones_detalle d ON r.idDetalle = d.idDetalle
-            JOIN cotizaciones_maestro m ON d.idCotizacion = m.idCotizacion
-            WHERE r.idRespuesta = $idRespuesta AND r.activo = 'si' AND m.cerrada = 'no'";
-    $res = mysqli_query($link, $sql);
+    // Iniciar transacción
+    mysqli_begin_transaction($link);
     
-    if ($res && $row = mysqli_fetch_assoc($res)) {
+    try {
+        // Obtener datos actuales de la respuesta (con bloqueo de lectura)
+        $sql = "SELECT r.*, d.cantidad_solicitada, d.idDetalle, d.cantidad_autorizada as total_autorizada_detalle
+                FROM respuesta_cotizacion r
+                JOIN cotizaciones_detalle d ON r.idDetalle = d.idDetalle
+                JOIN cotizaciones_maestro m ON d.idCotizacion = m.idCotizacion
+                WHERE r.idRespuesta = $idRespuesta AND r.activo = 'si' AND m.cerrada = 'no'
+                FOR UPDATE";
+        $res = mysqli_query($link, $sql);
+        
+        if (!$res || !($row = mysqli_fetch_assoc($res))) {
+            throw new Exception('No se encontró la respuesta o la cotización está cerrada.');
+        }
+        
         // Validar que no se intente bajar la cantidad autorizada
         if ($nueva_cantidad < $row['cantidad_autorizada']) {
-            $mensaje = 'Error: La cantidad autorizada no puede disminuirse.';
-            $tipo_mensaje = 'danger';
-        } else {
-            // Actualizar respuesta_cotizacion
-            $sql_update = "UPDATE respuesta_cotizacion SET 
-                           autorizado = 'si',
-                           cantidad_autorizada = $nueva_cantidad,
-                           fecha_autorizacion = CONVERT_TZ(NOW(),'UTC','America/Mexico_City'),
-                           usuario_autoriza = '$session_usuario',
-                           ultima_actualizacion = CONVERT_TZ(NOW(),'UTC','America/Mexico_City'),
-                           usuario_modifica = '$session_usuario'
-                           WHERE idRespuesta = $idRespuesta";
-            
-            if (mysqli_query($link, $sql_update)) {
-                // Actualizar cotizaciones_detalle: marcar comprar='si' y sumar cantidad_autorizada
-                $idDetalle = $row['idDetalle'];
-                $sql_det = "UPDATE cotizaciones_detalle SET 
-                            comprar = 'si',
-                            cantidad_autorizada = cantidad_autorizada + $nueva_cantidad,
-                            ultima_actualizacion = CONVERT_TZ(NOW(),'UTC','America/Mexico_City'),
-                            usuario_modifica = '$session_usuario'
-                            WHERE idDetalle = $idDetalle";
-                mysqli_query($link, $sql_det);
-                
-                $mensaje = 'Autorización guardada correctamente. Esta acción es IRREVERSIBLE.';
-                $tipo_mensaje = 'success';
-            } else {
-                $mensaje = 'Error al autorizar: ' . mysqli_error($link);
-                $tipo_mensaje = 'danger';
-            }
+            throw new Exception('Error: La cantidad autorizada no puede disminuirse.');
         }
+        
+        // Validar que no exceda lo solicitado
+        $pendiente = $row['cantidad_solicitada'] - $row['total_autorizada_detalle'];
+        if ($nueva_cantidad > $pendiente) {
+            throw new Exception('Error: La cantidad autorizada no puede exceder lo pendiente (' . number_format($pendiente, 6) . ').');
+        }
+        
+        // Actualizar respuesta_cotizacion
+        $sql_update = "UPDATE respuesta_cotizacion SET 
+                       autorizado = 'si',
+                       cantidad_autorizada = $nueva_cantidad,
+                       fecha_autorizacion = CONVERT_TZ(NOW(),'UTC','America/Mexico_City'),
+                       usuario_autoriza = '$usuario_sanitizado',
+                       ultima_actualizacion = CONVERT_TZ(NOW(),'UTC','America/Mexico_City'),
+                       usuario_modifica = '$usuario_sanitizado'
+                       WHERE idRespuesta = $idRespuesta";
+        
+        if (!mysqli_query($link, $sql_update)) {
+            throw new Exception('Error al actualizar respuesta: ' . mysqli_error($link));
+        }
+        
+        // Actualizar cotizaciones_detalle: marcar comprar='si' y sumar cantidad_autorizada
+        $idDetalle = $row['idDetalle'];
+        $sql_det = "UPDATE cotizaciones_detalle SET 
+                    comprar = 'si',
+                    cantidad_autorizada = cantidad_autorizada + $nueva_cantidad,
+                    ultima_actualizacion = CONVERT_TZ(NOW(),'UTC','America/Mexico_City'),
+                    usuario_modifica = '$usuario_sanitizado'
+                    WHERE idDetalle = $idDetalle";
+        
+        if (!mysqli_query($link, $sql_det)) {
+            throw new Exception('Error al actualizar detalle: ' . mysqli_error($link));
+        }
+        
+        // Confirmar transacción
+        mysqli_commit($link);
+        
+        $mensaje = 'Autorización guardada correctamente. Esta acción es IRREVERSIBLE.';
+        $tipo_mensaje = 'success';
+        
+    } catch (Exception $e) {
+        // Revertir transacción en caso de error
+        mysqli_rollback($link);
+        $mensaje = $e->getMessage();
+        $tipo_mensaje = 'danger';
     }
 }
 
@@ -95,7 +119,7 @@ $idCotizacion_sel = isset($_POST['idCotizacion']) ? intval($_POST['idCotizacion'
             <?php endif; ?>
             
             <!-- Selección de Cotización -->
-            <form method="POST" class="form-sistema mb-4">
+            <form method="POST" class="form-sistema mb-4" id="formSeleccion">
                 <div class="row">
                     <div class="col-md-8">
                         <div class="form-group">
@@ -236,11 +260,12 @@ if ($idCotizacion_sel) {
     while ($row = mysqli_fetch_assoc($res)) {
         $pendiente = $row['cantidad_solicitada'] - $row['total_autorizada_detalle'];
         $max_autorizar = min($row['cantidad_cotizada'], $pendiente);
+        if ($max_autorizar <= 0) continue;
 ?>
 <div class="modal fade" id="modalAutorizar<?php echo $row['idRespuesta']; ?>" tabindex="-1" role="dialog" aria-hidden="true" data-backdrop="static">
     <div class="modal-dialog" role="document">
         <div class="modal-content">
-            <form method="POST" onsubmit="return confirm('¿Confirma la autorización? Esta acción es IRREVERSIBLE.');">
+            <form method="POST" id="formAutorizar<?php echo $row['idRespuesta']; ?>" onsubmit="return validarYDesactivar(this, <?php echo $row['idRespuesta']; ?>)">
                 <div class="modal-header bg-success text-white">
                     <h5 class="modal-title">
                         <i class="fas fa-check-circle mr-2"></i> Autorizar Compra
@@ -286,17 +311,20 @@ if ($idCotizacion_sel) {
                     
                     <div class="form-group">
                         <label>Cantidad a Autorizar <span class="text-danger">*</span></label>
-                        <input type="number" name="cantidad_autorizada" class="form-control" 
-                               step="0.000001" min="0.000001" 
+                        <input type="number" name="cantidad_autorizada" id="cantidad<?php echo $row['idRespuesta']; ?>" 
+                               class="form-control" 
+                               step="0.000001" 
+                               min="0.000001" 
                                max="<?php echo $max_autorizar; ?>" 
-                               value="<?php echo $max_autorizar; ?>" required>
+                               value="<?php echo number_format($max_autorizar, 6, '.', ''); ?>" 
+                               required>
                         <small class="ayuda-campo">Máximo: <?php echo number_format($max_autorizar, 6); ?> (no puede disminuirse después)</small>
                     </div>
                     
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-cancelar" data-dismiss="modal">Cancelar</button>
-                    <button type="submit" name="confirmar_autorizacion" class="btn btn-guardar">
+                    <button type="submit" name="confirmar_autorizacion" id="btnAutorizar<?php echo $row['idRespuesta']; ?>" class="btn btn-guardar">
                         <i class="fas fa-lock mr-2"></i> Confirmar Autorización
                     </button>
                 </div>
@@ -308,6 +336,60 @@ if ($idCotizacion_sel) {
     }
 }
 ?>
+
+<script>
+// Validación y protección contra doble click
+function validarYDesactivar(formulario, id) {
+    var cantidad = parseFloat(document.getElementById('cantidad' + id).value);
+    var maximo = parseFloat(document.getElementById('cantidad' + id).max);
+    var minimo = parseFloat(document.getElementById('cantidad' + id).min);
+    
+    // Validar rango
+    if (isNaN(cantidad) || cantidad < minimo) {
+        alert('La cantidad debe ser mayor a ' + minimo);
+        return false;
+    }
+    if (cantidad > maximo) {
+        alert('La cantidad no puede exceder ' + maximo);
+        return false;
+    }
+    
+    // Validar 6 decimales máximo
+    var cantidadStr = document.getElementById('cantidad' + id).value;
+    if (cantidadStr.indexOf('.') !== -1) {
+        var decimales = cantidadStr.split('.')[1];
+        if (decimales && decimales.length > 6) {
+            alert('La cantidad no puede tener más de 6 decimales');
+            return false;
+        }
+    }
+    
+    // Confirmación adicional
+    if (!confirm('¿Está absolutamente seguro? Esta acción es IRREVERSIBLE y no podrá modificarse.')) {
+        return false;
+    }
+    
+    // Deshabilitar botón para evitar doble click
+    var boton = document.getElementById('btnAutorizar' + id);
+    boton.disabled = true;
+    boton.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Procesando...';
+    
+    return true;
+}
+
+// Validación en tiempo real de decimales
+document.addEventListener('DOMContentLoaded', function() {
+    var inputs = document.querySelectorAll('input[type="number"]');
+    inputs.forEach(function(input) {
+        input.addEventListener('blur', function() {
+            if (this.value) {
+                var valor = parseFloat(this.value);
+                this.value = valor.toFixed(6);
+            }
+        });
+    });
+});
+</script>
 
 </div>
 
