@@ -1,4 +1,6 @@
 <?php
+// Modelo: KIMI 2.5
+// Módulo: Dashboard Principal de Seguimiento de Compras Pendientes
 /**
  * Proyecto MalTir - Sistema de Gestión de Compras por Cotización
  * 
@@ -18,10 +20,6 @@
  * 
  * "Los datos no mienten, las personas sí."
  */
-
-// Modelo: KIMI 2.5
-// Módulo: Dashboard Principal de Seguimiento de Compras Pendientes
-// Actualizado: Columna "Días Margen" agregada - positivo = a tiempo, negativo = atrasado
 ?>
 
 <?php require_once 'headerkimi.php'; ?>
@@ -36,61 +34,87 @@ $idProveedor_filtro = isset($_POST['idProveedor']) ? intval($_POST['idProveedor'
 $fecha_desde = isset($_POST['fecha_desde']) ? $_POST['fecha_desde'] : '';
 $fecha_hasta = isset($_POST['fecha_hasta']) ? $_POST['fecha_hasta'] : '';
 
-// Construir WHERE base
-$where = "WHERE d.activo = 'si' AND d.comprar = 'si' AND d.cantidad_recibida < d.cantidad_autorizada";
+// Paginación
+$pagina = isset($_POST['pagina']) ? intval($_POST['pagina']) : 1;
+$registros_por_pagina = 50;
+$offset = ($pagina - 1) * $registros_por_pagina;
+
+// Construir WHERE base - LÓGICA CORREGIDA: pendiente viene de respuesta_cotizacion
+$where = "WHERE d.activo = 'si' 
+          AND d.comprar = 'si' 
+          AND r.autorizado = 'si' 
+          AND r.activo = 'si'
+          AND r.cantidad_recibida < r.cantidad_autorizada";
 
 if ($idProveedor_filtro > 0) {
-    $where .= " AND r.idProveedor = $idProveedor_filtro";
+    $where .= " AND r.idProveedor = " . intval($idProveedor_filtro);
 }
 if ($fecha_desde) {
-    $where .= " AND d.fecha_requerida >= '$fecha_desde'";
+    $where .= " AND d.fecha_requerida >= '" . mysqli_real_escape_string($link, $fecha_desde) . "'";
 }
 if ($fecha_hasta) {
-    $where .= " AND d.fecha_requerida <= '$fecha_hasta'";
+    $where .= " AND d.fecha_requerida <= '" . mysqli_real_escape_string($link, $fecha_hasta) . "'";
 }
 
-// Obtener partidas pendientes
-$sql = "SELECT d.*, 
+// Consulta CORREGIDA - la "verdad" de lo pendiente está en respuesta_cotizacion
+$sql = "SELECT d.idDetalle, d.idCotizacion, d.fecha_requerida, d.idArticulo,
         a.nombre as articulo_nombre, 
         u.idUnidadMedida,
-        p.nombre as proveedor_nombre,
-        c.idCotizacion,
+        p.idProveedor, p.nombre as proveedor_nombre,
         c.comentario as cotizacion_comentario,
+        r.idRespuesta,
         r.precio_total,
         r.cantidad_cotizada,
         r.ajuste,
-        r.fecha_comprometida
+        r.fecha_comprometida,
+        r.cantidad_autorizada,
+        r.cantidad_recibida
         FROM cotizaciones_detalle d
-        JOIN cat_articulos a ON d.idArticulo = a.idArticulo
-        JOIN cat_unidades_medida u ON d.idUnidadMedida = u.idUnidadMedida
-        JOIN cotizaciones_maestro c ON d.idCotizacion = c.idCotizacion
-        JOIN respuesta_cotizacion r ON d.idDetalle = r.idDetalle AND r.autorizado = 'si' AND r.activo = 'si'
-        JOIN cat_proveedores p ON r.idProveedor = p.idProveedor
+        INNER JOIN cat_articulos a ON d.idArticulo = a.idArticulo
+        INNER JOIN cat_unidades_medida u ON d.idUnidadMedida = u.idUnidadMedida
+        INNER JOIN cotizaciones_maestro c ON d.idCotizacion = c.idCotizacion
+        INNER JOIN respuesta_cotizacion r ON d.idDetalle = r.idDetalle 
+        INNER JOIN cat_proveedores p ON r.idProveedor = p.idProveedor
         $where
-        ORDER BY d.fecha_requerida ASC";
+        ORDER BY d.fecha_requerida ASC
+        LIMIT $offset, $registros_por_pagina";
 
 $res = mysqli_query($link, $sql);
 
+// Contar total para paginación
+$sql_count = "SELECT COUNT(*) as total 
+              FROM cotizaciones_detalle d
+              INNER JOIN respuesta_cotizacion r ON d.idDetalle = r.idDetalle 
+              INNER JOIN cat_proveedores p ON r.idProveedor = p.idProveedor
+              $where";
+$res_count = mysqli_query($link, $sql_count);
+$row_count = mysqli_fetch_assoc($res_count);
+$total_registros = $row_count['total'];
+$total_paginas = ceil($total_registros / $registros_por_pagina);
+
 // Calcular estatus basado en reglas
-function calcularEstatus($fecha_requerida, $fecha_comprometida, $fecha_recibida, $ajuste, $idArticulo, $idProveedor, $link) {
+function calcularEstatus($fecha_requerida, $fecha_comprometida, $ajuste, $idArticulo, $idProveedor, $link) {
+    global $link;
+    
     $hoy = new DateTime();
     $fecha_req = new DateTime($fecha_requerida);
     $dias_para_requerida = $hoy->diff($fecha_req)->days;
     $es_pasado = $hoy > $fecha_req;
     
-    // Si ya tiene ajuste positivo (excedente/urgente) = avión
+    // Si tiene ajuste positivo = envío urgente aéreo
     if ($ajuste > 0) {
         return ['clase' => 'status-avion', 'icono' => 'fa-plane', 'texto' => 'Envío urgente aéreo', 'color_fila' => 'table-warning'];
     }
     
-    // Calcular si llegará a tiempo basado en historial kardex
+    // Calcular días promedio de entrega por historial kardex
     $dias_promedio = null;
     $sql_hist = "SELECT AVG(DATEDIFF(k.fecha_movimiento, r.fecha_autorizacion)) as dias_promedio
                  FROM kardex k
-                 JOIN cotizaciones_detalle d ON k.idArticulo = d.idArticulo
-                 JOIN respuesta_cotizacion r ON d.idDetalle = r.idDetalle
-                 WHERE k.idArticulo = $idArticulo AND r.idProveedor = $idProveedor
-                 AND k.tipo_movimiento = 'entrada' AND r.fecha_autorizacion IS NOT NULL
+                 JOIN respuesta_cotizacion r ON k.idArticulo = r.idArticulo
+                 WHERE k.idArticulo = " . intval($idArticulo) . " 
+                 AND r.idProveedor = " . intval($idProveedor) . "
+                 AND k.tipo_movimiento = 'entrada' 
+                 AND r.fecha_autorizacion IS NOT NULL
                  HAVING dias_promedio IS NOT NULL";
     $res_hist = mysqli_query($link, $sql_hist);
     if ($res_hist && $row_hist = mysqli_fetch_assoc($res_hist)) {
@@ -100,54 +124,54 @@ function calcularEstatus($fecha_requerida, $fecha_comprometida, $fecha_recibida,
     // Si por historial no llegará a tiempo = bomba
     if ($dias_promedio !== null && $fecha_comprometida) {
         $fecha_comp = new DateTime($fecha_comprometida);
-        $dias_necesarios = $hoy->diff($fecha_comp)->days;
+        $dias_hasta_compromiso = $hoy->diff($fecha_comp)->days;
         
-        if ($dias_necesarios < $dias_promedio && !$es_pasado) {
-            return ['clase' => 'status-bomba', 'icono' => 'fa-bomb', 'texto' => 'Va a estallar - no llegará', 'color_fila' => 'table-danger'];
+        // Si necesito más días de los que tengo hasta el compromiso = no llegará
+        if ($dias_promedio > $dias_hasta_compromiso && !$es_pasado) {
+            return ['clase' => 'status-bomba', 'icono' => 'fa-bomb', 'texto' => 'Va a estallar - por historial no llegará', 'color_fila' => 'table-danger'];
         }
     }
     
-    // Si faltan 7 días o menos = warning
-    if ($dias_para_requerida <= 7 && !$es_pasado) {
-        return ['clase' => 'status-warning', 'icono' => 'fa-exclamation-circle', 'texto' => 'Faltan ' . $dias_para_requerida . ' días', 'color_fila' => 'table-warning'];
+    // Si ya pasó la fecha requerida = bomba
+    if ($es_pasado) {
+        return ['clase' => 'status-bomba', 'icono' => 'fa-bomb', 'texto' => 'Vencido - fecha requerida pasada', 'color_fila' => 'table-danger'];
     }
     
-    // Si ya pasó la fecha requerida y no se recibió = bomba
-    if ($es_pasado && !$fecha_recibida) {
-        return ['clase' => 'status-bomba', 'icono' => 'fa-bomb', 'texto' => 'Vencido - no recibido', 'color_fila' => 'table-danger'];
+    // Si faltan 7 días o menos = warning
+    if ($dias_para_requerida <= 7) {
+        return ['clase' => 'status-warning', 'icono' => 'fa-exclamation-circle', 'texto' => 'Faltan ' . $dias_para_requerida . ' días', 'color_fila' => 'table-warning'];
     }
     
     // Default = ok
     return ['clase' => 'status-ok', 'icono' => 'fa-check', 'texto' => 'A tiempo', 'color_fila' => ''];
 }
 
-// Calcular días margen (nueva función)
+// Calcular días margen respecto a fecha comprometida
 function calcularDiasMargen($fecha_comprometida, $fecha_requerida) {
     $hoy = new DateTime();
     
-    // Si hay fecha comprometida, calcular respecto a esa
     if ($fecha_comprometida) {
         $fecha_comp = new DateTime($fecha_comprometida);
         $diff = $hoy->diff($fecha_comp);
         $dias = $diff->days;
         
-        // Si hoy > fecha comprometida = negativo (atrasado)
+        // Si hoy > fecha comprometida = negativo (atrasado vs compromiso)
         if ($hoy > $fecha_comp) {
-            return -$dias; // Negativo = días de atraso
+            return -$dias;
         } else {
-            return $dias; // Positivo = días de margen
+            return $dias;
         }
     }
     
-    // Si no hay fecha comprometida, calcular respecto a fecha requerida
+    // Si no hay fecha comprometida, calcular vs fecha requerida
     $fecha_req = new DateTime($fecha_requerida);
     $diff = $hoy->diff($fecha_req);
     $dias = $diff->days;
     
     if ($hoy > $fecha_req) {
-        return -$dias; // Negativo = días de atraso vs requerida
+        return -$dias;
     } else {
-        return $dias; // Positivo = días de margen vs requerida
+        return $dias;
     }
 }
 ?>
@@ -155,13 +179,15 @@ function calcularDiasMargen($fecha_comprometida, $fecha_requerida) {
 <div class="container-fluid">
     
     <div class="card card-modulo mb-4">
-        <div class="card-header bg-primary text-white">
-            <i class="fas fa-tachometer-alt mr-2"></i> Dashboard de Partidas Pendientes
+        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+            <span><i class="fas fa-tachometer-alt mr-2"></i> Dashboard de Partidas Pendientes</span>
+            <small class="text-light">Modelo: KIMI 2.5</small>
         </div>
         <div class="card-body">
             
             <!-- Filtros -->
             <form method="POST" class="form-sistema mb-4">
+                <input type="hidden" name="pagina" value="1">
                 <div class="row">
                     <div class="col-md-4">
                         <div class="form-group">
@@ -173,7 +199,10 @@ function calcularDiasMargen($fecha_comprometida, $fecha_requerida) {
                                                                  FROM cat_proveedores p
                                                                  JOIN respuesta_cotizacion r ON p.idProveedor = r.idProveedor
                                                                  JOIN cotizaciones_detalle d ON r.idDetalle = d.idDetalle
-                                                                 WHERE d.comprar = 'si' AND d.cantidad_recibida < d.cantidad_autorizada
+                                                                 WHERE d.comprar = 'si' 
+                                                                 AND r.autorizado = 'si' 
+                                                                 AND r.activo = 'si'
+                                                                 AND r.cantidad_recibida < r.cantidad_autorizada
                                                                  AND p.activo = 'si' ORDER BY p.nombre");
                                 while ($row = mysqli_fetch_assoc($res_prov)) {
                                     $selected = ($idProveedor_filtro == $row['idProveedor']) ? 'selected' : '';
@@ -186,13 +215,13 @@ function calcularDiasMargen($fecha_comprometida, $fecha_requerida) {
                     <div class="col-md-3">
                         <div class="form-group">
                             <label>Fecha Requerida Desde</label>
-                            <input type="datetime-local" name="fecha_desde" class="form-control" value="<?php echo $fecha_desde; ?>" onchange="this.form.submit()">
+                            <input type="datetime-local" name="fecha_desde" class="form-control" value="<?php echo htmlspecialchars($fecha_desde); ?>" onchange="this.form.submit()">
                         </div>
                     </div>
                     <div class="col-md-3">
                         <div class="form-group">
                             <label>Fecha Requerida Hasta</label>
-                            <input type="datetime-local" name="fecha_hasta" class="form-control" value="<?php echo $fecha_hasta; ?>" onchange="this.form.submit()">
+                            <input type="datetime-local" name="fecha_hasta" class="form-control" value="<?php echo htmlspecialchars($fecha_hasta); ?>" onchange="this.form.submit()">
                         </div>
                     </div>
                     <div class="col-md-2">
@@ -218,7 +247,7 @@ function calcularDiasMargen($fecha_comprometida, $fecha_requerida) {
             <div class="alert alert-secondary mb-3">
                 <i class="fas fa-info-circle mr-2"></i>
                 <strong>Días Margen:</strong> 
-                <span class="text-success font-weight-bold">Positivo</span> = días de margen antes de fecha comprometida. 
+                <span class="text-success font-weight-bold">Positivo</span> = días antes de fecha comprometida. 
                 <span class="text-danger font-weight-bold">Negativo</span> = días de atraso después de fecha comprometida.
             </div>
             
@@ -243,17 +272,16 @@ function calcularDiasMargen($fecha_comprometida, $fecha_requerida) {
                         <?php
                         $total_importe = 0;
                         while ($row = mysqli_fetch_assoc($res)) {
+                            // CORREGIDO: usar cantidad_autorizada y cantidad_recibida de respuesta_cotizacion
                             $cantidad_pendiente = $row['cantidad_autorizada'] - $row['cantidad_recibida'];
                             $precio_unitario = $row['precio_total'] / $row['cantidad_cotizada'];
                             $importe_estimado = $precio_unitario * $cantidad_pendiente;
                             $total_importe += $importe_estimado;
                             
-                            $estatus = calcularEstatus($row['fecha_requerida'], $row['fecha_comprometida'], $row['fecha_recibida'], $row['ajuste'], $row['idArticulo'], $row['idProveedor'], $link);
+                            $estatus = calcularEstatus($row['fecha_requerida'], $row['fecha_comprometida'], $row['ajuste'], $row['idArticulo'], $row['idProveedor'], $link);
                             
-                            // Calcular días margen
                             $dias_margen = calcularDiasMargen($row['fecha_comprometida'], $row['fecha_requerida']);
                             
-                            // Clase para días margen
                             if ($dias_margen > 7) {
                                 $clase_margen = 'text-success font-weight-bold';
                                 $icono_margen = '<i class="fas fa-arrow-up mr-1"></i>';
@@ -277,7 +305,6 @@ function calcularDiasMargen($fecha_comprometida, $fecha_requerida) {
                             echo '<td>' . date('d/m/Y', strtotime($row['fecha_requerida'])) . '</td>';
                             echo '<td>' . ($row['fecha_comprometida'] ? date('d/m/Y', strtotime($row['fecha_comprometida'])) : '-') . '</td>';
                             
-                            // Nueva columna: Días Margen
                             echo '<td class="' . $clase_margen . '">';
                             echo $icono_margen . $dias_margen;
                             if ($dias_margen > 0) {
@@ -317,6 +344,25 @@ function calcularDiasMargen($fecha_comprometida, $fecha_requerida) {
                     <?php endif; ?>
                 </table>
             </div>
+            
+            <!-- Paginación -->
+            <?php if ($total_paginas > 1): ?>
+            <nav aria-label="Paginación">
+                <ul class="pagination pagination-sistema justify-content-center">
+                    <?php for ($i = 1; $i <= $total_paginas; $i++): ?>
+                    <li class="page-item <?php echo ($i == $pagina) ? 'active' : ''; ?>">
+                        <form method="POST" style="display:inline;">
+                            <input type="hidden" name="pagina" value="<?php echo $i; ?>">
+                            <input type="hidden" name="idProveedor" value="<?php echo $idProveedor_filtro; ?>">
+                            <input type="hidden" name="fecha_desde" value="<?php echo htmlspecialchars($fecha_desde); ?>">
+                            <input type="hidden" name="fecha_hasta" value="<?php echo htmlspecialchars($fecha_hasta); ?>">
+                            <button type="submit" class="page-link"><?php echo $i; ?></button>
+                        </form>
+                    </li>
+                    <?php endfor; ?>
+                </ul>
+            </nav>
+            <?php endif; ?>
             
         </div>
     </div>
