@@ -21,7 +21,7 @@
 // ============================================
 // INICIALIZACIÓN GLOBAL
 // ============================================
-
+session_start();
 // Tiempo de inicio para cálculo de render
 $tiempo_inicio = microtime(true);
 
