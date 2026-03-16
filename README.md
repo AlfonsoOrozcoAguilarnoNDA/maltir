@@ -153,6 +153,14 @@ Refuerza la idea de por qué elegimos PHP 8.x procedural. En un mundo obsesionad
 
 Es casi imposible lograr este nivel de calidad con **Laravel** o **Symfony**, y si fueran compras de sector salud no lo podríamos hacer por trazabilidad y dependencias no auditables.
 
+## Principio de dependencias y trazabilidad
+
+**Tener pocas dependencias es indispensable.**  
+Por *Compliance*, la trazabilidad no es negociable.  
+
+a) En sectores críticos, una dependencia oculta en un *framework* es un punto ciego.  
+b) El código procedural es un libro abierto para todos y mucho más mantenible que una estructura de objetos.  
+
 https://vibecodingmexico.com/laboratorio-2-sistema-de-compras/ se ve el estado actual.
 
 ---
