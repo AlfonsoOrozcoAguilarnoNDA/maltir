@@ -21,21 +21,11 @@
 
 // Modelo: KIMI 2.5
 // Módulo: Registro de Recepción Física de Mercancía
-// NOTA IMPORTANTE SOBRE RESPONSABILIDADES:
-// Esta pantalla pertenece al módulo de ALMACÉN. Su función es registrar lo físicamente recibido.
-// 
-// DIFERENCIAS DE PRECIO/FACTURACIÓN:
-// Si el proveedor entrega menos cantidad de lo autorizado, o existe diferencia de precio,
-// es responsabilidad del DEPARTAMENTO DE COMPRAS (no de almacén) gestionar:
-// - Solicitar factura por diferencia si se recibió de más
-// - Solicitar nota de crédito o rebaja si se pagó por lo no entregado
-// - Verificar que la factura emitida corresponda a lo realmente entregado
-// 
-// En la práctica, los proveedores suelen facturar por lo efectivamente entregado.
-// Cualquier discrepancia de precio o facturación debe resolverse en un futuro
-// módulo contable de compras, no en esta pantalla de entrada de mercancías.
-// 
-// El almacén solo registra: QUÉ llegó, CUÁNTO llegó, CUÁNDO llegó.
+// VERSIÓN CORREGIDA: 
+// - El cierre de cotización NO bloquea recepciones físicas
+// - Bloqueo real: no hay partidas autorizadas pendientes o ya se recibió 100%+
+// - Muestra precio estimado para verificación de cambios de precio por proveedor
+// - Transacción completa y anti-doble click
 ?>
 
 <?php require_once 'headerkimi.php'; ?>
@@ -53,40 +43,51 @@ $tipo_mensaje = '';
 $idCotizacion_sel = isset($_POST['idCotizacion']) ? intval($_POST['idCotizacion']) : 0;
 $usuario_sanitizado = mysqli_real_escape_string($link, $session_usuario);
 
-// Procesar recepción
+// Procesar recepción con TRANSACCIÓN
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['guardar_entrada'])) {
-    $idCotizacion = intval($_POST['idCotizacion']);
-    $idDetalle = intval($_POST['idDetalle']);
-    $cantidad_recibir = floatval($_POST['cantidad_recibir']);
     
     // Validar checkbox de confirmación
     if (!isset($_POST['confirmo_presentacion'])) {
         $mensaje = 'Debe confirmar que la presentación recibida corresponde a la solicitada.';
         $tipo_mensaje = 'danger';
     } else {
-        // Iniciar transacción para garantizar integridad entre las 3 tablas
+        // Iniciar transacción
         mysqli_begin_transaction($link);
         
         try {
-            // Obtener datos de la partida con bloqueo
-            $sql = "SELECT d.*, a.idArticulo, a.existencia as existencia_actual
+            $idCotizacion = intval($_POST['idCotizacion']);
+            $idDetalle = intval($_POST['idDetalle']);
+            $cantidad_recibir = floatval($_POST['cantidad_recibir']);
+            
+            // Obtener datos de la partida con bloqueo FOR UPDATE
+            $sql = "SELECT d.*, a.idArticulo, a.existencia as existencia_actual, 
+                           r.precio_total, r.cantidad_cotizada, r.cantidad_autorizada as cant_aut_resp
                     FROM cotizaciones_detalle d
                     JOIN cat_articulos a ON d.idArticulo = a.idArticulo
-                    WHERE d.idDetalle = $idDetalle AND d.idCotizacion = $idCotizacion
+                    JOIN respuesta_cotizacion r ON d.idDetalle = r.idDetalle AND r.autorizado = 'si' AND r.activo = 'si'
+                    WHERE d.idDetalle = $idDetalle AND d.idCotizacion = $idCotizacion AND d.activo = 'si'
                     FOR UPDATE";
             $res = mysqli_query($link, $sql);
             
             if (!$res || !($partida = mysqli_fetch_assoc($res))) {
-                throw new Exception('Partida no encontrada.');
+                throw new Exception('Partida no encontrada o no está autorizada.');
+            }
+            
+            // Validar que la partida tenga cantidad pendiente por recibir
+            $cantidad_autorizada = $partida['cantidad_autorizada'] > 0 ? $partida['cantidad_autorizada'] : $partida['cant_aut_resp'];
+            $cantidad_actual_recibida = $partida['cantidad_recibida'];
+            $cantidad_pendiente = $cantidad_autorizada - $cantidad_actual_recibida;
+            
+            if ($cantidad_pendiente <= 0) {
+                throw new Exception('Esta partida ya fue recibida completamente. No puede recibir más mercancía.');
             }
             
             // Validar que no se exceda lo autorizado + margen permitido
-            $cantidad_autorizada = $partida['cantidad_autorizada'];
             $max_permitido = $cantidad_autorizada * (1 + ($max_excedente_pct / 100));
-            $nueva_cantidad_recibida = $partida['cantidad_recibida'] + $cantidad_recibir;
+            $nueva_cantidad_recibida = $cantidad_actual_recibida + $cantidad_recibir;
             
             if ($nueva_cantidad_recibida > $max_permitido) {
-                throw new Exception('La cantidad a recibir excede el máximo permitido del ' . $max_excedente_pct . '% sobre lo autorizado.');
+                throw new Exception('La cantidad a recibir excede el máximo permitido del ' . $max_excedente_pct . '% sobre lo autorizado (' . number_format($max_permitido, 6) . ').');
             }
             
             // 1. Actualizar cotizaciones_detalle
@@ -159,36 +160,38 @@ if ($idCotizacion_sel > 0) {
         $cotizacion_bloqueada = true;
         $mensaje_bloqueo = 'La cotización no existe o está eliminada.';
     } else {
-        $cot = mysqli_fetch_assoc($res);
+        // CORRECCIÓN: El cierre de cotización NO bloquea recepciones físicas
+        // El bloqueo real es: no hay partidas autorizadas con cantidad pendiente por recibir
         
-        // Verificar si está cerrada
-        if ($cot['cerrada'] == 'si') {
+        $sql_pend = "SELECT d.*, a.nombre as articulo_nombre, u.idUnidadMedida,
+                            r.precio_total, r.cantidad_cotizada, r.cantidad_autorizada as cant_aut_resp,
+                            p.nombre as proveedor_nombre
+                     FROM cotizaciones_detalle d
+                     JOIN cat_articulos a ON d.idArticulo = a.idArticulo
+                     JOIN cat_unidades_medida u ON d.idUnidadMedida = u.idUnidadMedida
+                     JOIN respuesta_cotizacion r ON d.idDetalle = r.idDetalle AND r.autorizado = 'si' AND r.activo = 'si'
+                     JOIN cat_proveedores p ON r.idProveedor = p.idProveedor
+                     WHERE d.idCotizacion = $idCotizacion_sel 
+                     AND d.activo = 'si' 
+                     AND d.comprar = 'si'
+                     AND d.cantidad_recibida < IFNULL(d.cantidad_autorizada, r.cantidad_autorizada)
+                     ORDER BY d.idDetalle";
+        $res_pend = mysqli_query($link, $sql_pend);
+        
+        while ($row = mysqli_fetch_assoc($res_pend)) {
+            // Calcular precio unitario y pendiente
+            $cantidad_autorizada = $row['cantidad_autorizada'] > 0 ? $row['cantidad_autorizada'] : $row['cant_aut_resp'];
+            $precio_unitario = $row['precio_total'] / $row['cantidad_cotizada'];
+            $row['precio_unitario'] = $precio_unitario;
+            $row['cantidad_autorizada_real'] = $cantidad_autorizada;
+            $row['cantidad_pendiente'] = $cantidad_autorizada - $row['cantidad_recibida'];
+            $partidas_pendientes[] = $row;
+        }
+        
+        if (count($partidas_pendientes) == 0) {
             $cotizacion_bloqueada = true;
-            $mensaje_bloqueo = 'Esta cotización ya está cerrada.';
-        } else {
-            // Verificar si tiene partidas pendientes
-            $sql_pend = "SELECT d.*, a.nombre as articulo_nombre, u.idUnidadMedida,
-                                r.precio_total, p.nombre as proveedor_nombre, r.cantidad_autorizada as cantidad_aut_resp
-                         FROM cotizaciones_detalle d
-                         JOIN cat_articulos a ON d.idArticulo = a.idArticulo
-                         JOIN cat_unidades_medida u ON d.idUnidadMedida = u.idUnidadMedida
-                         JOIN respuesta_cotizacion r ON d.idDetalle = r.idDetalle AND r.autorizado = 'si' AND r.activo = 'si'
-                         JOIN cat_proveedores p ON r.idProveedor = p.idProveedor
-                         WHERE d.idCotizacion = $idCotizacion_sel 
-                         AND d.activo = 'si' 
-                         AND d.comprar = 'si'
-                         AND d.cantidad_recibida < d.cantidad_autorizada
-                         ORDER BY d.idDetalle";
-            $res_pend = mysqli_query($link, $sql_pend);
-            
-            while ($row = mysqli_fetch_assoc($res_pend)) {
-                $partidas_pendientes[] = $row;
-            }
-            
-            if (count($partidas_pendientes) == 0) {
-                $cotizacion_bloqueada = true;
-                $mensaje_bloqueo = 'Esta cotización ya fue entregada completamente (no hay partidas pendientes de recepción).';
-            }
+            // Mensaje corregido: no es por cierre, es por completitud o falta de autorización
+            $mensaje_bloqueo = 'No hay partidas autorizadas pendientes de recepción. Verifique que: (1) existan respuestas autorizadas, (2) no se haya recibido ya el 100% o más de lo autorizado.';
         }
     }
 }
@@ -232,8 +235,8 @@ if ($idCotizacion_sel > 0) {
             <?php if ($idCotizacion_sel > 0): ?>
                 
                 <?php if ($cotizacion_bloqueada): ?>
-                    <div class="alert alert-danger alert-sistema">
-                        <i class="fas fa-ban mr-2"></i> <?php echo $mensaje_bloqueo; ?> No se pueden registrar entradas.
+                    <div class="alert alert-warning alert-sistema">
+                        <i class="fas fa-info-circle mr-2"></i> <?php echo $mensaje_bloqueo; ?>
                     </div>
                 <?php else: ?>
                     
@@ -251,14 +254,10 @@ if ($idCotizacion_sel > 0) {
                     </div>
                     
                     <!-- Alerta sobre responsabilidades -->
-                    <div class="alert alert-warning mb-3">
-                        <i class="fas fa-exclamation-triangle mr-2"></i>
-                        <strong>Responsabilidad del Almacén:</strong> Registrar únicamente la cantidad físicamente recibida.
-                        <br>
-                        <small class="text-muted">
-                            Cualquier diferencia de precio o facturación debe gestionarse con el departamento de Compras, 
-                            no en esta pantalla. El proveedor deberá emitir la factura correspondiente a lo efectivamente entregado.
-                        </small>
+                    <div class="alert alert-secondary mb-3">
+                        <i class="fas fa-calculator mr-2"></i>
+                        <strong>Verificación de Precio:</strong> El monto estimado se calcula con el precio cotizado originalmente. 
+                        Si el proveedor cambió el precio, el departamento de Compras debe gestionar la diferencia (nota de crédito/factura complementaria).
                     </div>
                     
                     <div class="table-responsive">
@@ -271,24 +270,22 @@ if ($idCotizacion_sel > 0) {
                                     <th>Autorizado</th>
                                     <th>Recibido</th>
                                     <th>Pendiente</th>
-                                    <th>Precio Unit. Est.</th>
+                                    <th>Precio Unit.</th>
                                     <th>Acción</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <?php foreach ($partidas_pendientes as $partida): 
-                                    $cantidad_autorizada = $partida['cantidad_autorizada'] > 0 ? $partida['cantidad_autorizada'] : $partida['cantidad_aut_resp'];
-                                    $pendiente = $cantidad_autorizada - $partida['cantidad_recibida'];
-                                    $precio_unit = $partida['precio_total'] / $cantidad_autorizada;
+                                    $monto_estimado = $partida['precio_unitario'] * $partida['cantidad_pendiente'];
                                 ?>
                                 <tr>
                                     <td><?php echo $partida['idDetalle']; ?></td>
                                     <td><?php echo htmlspecialchars($partida['articulo_nombre']); ?></td>
                                     <td><?php echo htmlspecialchars($partida['proveedor_nombre']); ?></td>
-                                    <td><?php echo number_format($cantidad_autorizada, 6) . ' ' . $partida['idUnidadMedida']; ?></td>
+                                    <td><?php echo number_format($partida['cantidad_autorizada_real'], 6) . ' ' . $partida['idUnidadMedida']; ?></td>
                                     <td><?php echo number_format($partida['cantidad_recibida'], 6); ?></td>
-                                    <td class="font-weight-bold text-primary"><?php echo number_format($pendiente, 6); ?></td>
-                                    <td>$<?php echo number_format($precio_unit, 2); ?></td>
+                                    <td class="font-weight-bold text-primary"><?php echo number_format($partida['cantidad_pendiente'], 6); ?></td>
+                                    <td>$<?php echo number_format($partida['precio_unitario'], 2); ?></td>
                                     <td>
                                         <button type="button" class="btn btn-guardar btn-sm" 
                                                 data-toggle="modal" 
@@ -313,15 +310,13 @@ if ($idCotizacion_sel > 0) {
 
 <!-- Modales de Entrada por Partida -->
 <?php foreach ($partidas_pendientes as $partida): 
-    $cantidad_autorizada = $partida['cantidad_autorizada'] > 0 ? $partida['cantidad_autorizada'] : $partida['cantidad_aut_resp'];
-    $pendiente = $cantidad_autorizada - $partida['cantidad_recibida'];
-    $max_permitido = $cantidad_autorizada * (1 + ($max_excedente_pct / 100));
-    $excedente_max = $max_permitido - $cantidad_autorizada;
+    $max_permitido = $partida['cantidad_autorizada_real'] * (1 + ($max_excedente_pct / 100));
+    $precio_unit = $partida['precio_unitario'];
 ?>
 <div class="modal fade" id="modalEntrada<?php echo $partida['idDetalle']; ?>" tabindex="-1" role="dialog" aria-hidden="true">
-    <div class="modal-dialog" role="document">
+    <div class="modal-dialog modal-lg" role="document">
         <div class="modal-content">
-            <form method="POST" onsubmit="return validarEntrada<?php echo $partida['idDetalle']; ?>()">
+            <form method="POST" id="formEntrada<?php echo $partida['idDetalle']; ?>" onsubmit="return validarYDesactivar(<?php echo $partida['idDetalle']; ?>)">
                 <div class="modal-header bg-success text-white">
                     <h5 class="modal-title">
                         <i class="fas fa-dolly mr-2"></i> Registrar Entrada
@@ -335,30 +330,67 @@ if ($idCotizacion_sel > 0) {
                     <input type="hidden" name="idCotizacion" value="<?php echo $idCotizacion_sel; ?>">
                     <input type="hidden" name="idDetalle" value="<?php echo $partida['idDetalle']; ?>">
                     
-                    <div class="alert alert-info">
-                        <strong>Artículo:</strong> <?php echo htmlspecialchars($partida['articulo_nombre']); ?><br>
-                        <strong>Proveedor:</strong> <?php echo htmlspecialchars($partida['proveedor_nombre']); ?><br>
-                        <strong>Cantidad Autorizada:</strong> <?php echo number_format($cantidad_autorizada, 6) . ' ' . $partida['idUnidadMedida']; ?><br>
-                        <strong>Ya Recibido:</strong> <?php echo number_format($partida['cantidad_recibida'], 6); ?><br>
-                        <strong class="text-primary">Pendiente:</strong> <?php echo number_format($pendiente, 6); ?>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="alert alert-info mb-3">
+                                <strong>Artículo:</strong> <?php echo htmlspecialchars($partida['articulo_nombre']); ?><br>
+                                <strong>Proveedor:</strong> <?php echo htmlspecialchars($partida['proveedor_nombre']); ?><br>
+                                <strong>Cantidad Autorizada:</strong> <?php echo number_format($partida['cantidad_autorizada_real'], 6) . ' ' . $partida['idUnidadMedida']; ?><br>
+                                <strong>Ya Recibido:</strong> <?php echo number_format($partida['cantidad_recibida'], 6); ?><br>
+                                <strong class="text-primary">Pendiente:</strong> <?php echo number_format($partida['cantidad_pendiente'], 6); ?>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="alert alert-warning mb-3">
+                                <strong>Precio Unitario Cotizado:</strong> $<?php echo number_format($precio_unit, 2); ?><br>
+                                <strong>Monto Estimado Pendiente:</strong> 
+                                <span class="h4 text-primary">$<?php echo number_format($partida['precio_unitario'] * $partida['cantidad_pendiente'], 2); ?></span>
+                                <hr class="my-2">
+                                <small class="text-muted">
+                                    Si el proveedor cambió el precio, notifique a Compras. 
+                                    El almacén solo registra cantidades físicas.
+                                </small>
+                            </div>
+                        </div>
                     </div>
                     
-                    <div class="form-group">
-                        <label>Cantidad a Recibir <span class="text-danger">*</span></label>
-                        <input type="number" name="cantidad_recibir" id="cantidad<?php echo $partida['idDetalle']; ?>" 
-                               class="form-control" step="0.000001" min="0.000001" 
-                               max="<?php echo $max_permitido; ?>" required>
-                        <small class="ayuda-campo">
-                            Máximo permitido: <?php echo number_format($max_permitido, 6); ?> 
-                            (incluye <?php echo $max_excedente_pct; ?>% de excedente)
-                        </small>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label>Cantidad a Recibir <span class="text-danger">*</span></label>
+                                <input type="number" name="cantidad_recibir" id="cantidad<?php echo $partida['idDetalle']; ?>" 
+                                       class="form-control form-control-lg" 
+                                       step="0.000001" 
+                                       min="0.000001" 
+                                       max="<?php echo $max_permitido; ?>" 
+                                       oninput="calcularMonto(<?php echo $partida['idDetalle']; ?>, <?php echo $precio_unit; ?>)"
+                                       required>
+                                <small class="ayuda-campo">
+                                    Máximo permitido: <?php echo number_format($max_permitido, 6); ?> 
+                                    (incluye <?php echo $max_excedente_pct; ?>% de excedente)
+                                </small>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label>Monto Estimado (readonly - para verificación)</label>
+                                <input type="text" id="montoEstimado<?php echo $partida['idDetalle']; ?>" 
+                                       class="form-control form-control-lg bg-light text-primary font-weight-bold" 
+                                       readonly 
+                                       value="$0.00">
+                                <small class="ayuda-campo text-success">
+                                    <i class="fas fa-check-circle mr-1"></i>
+                                    Compare con lo que indica el proveedor en albarán/factura
+                                </small>
+                            </div>
+                        </div>
                     </div>
                     
                     <!-- Advertencia de excedente -->
                     <div id="alertaExcedente<?php echo $partida['idDetalle']; ?>" class="alert alert-danger" style="display:none;">
                         <i class="fas fa-exclamation-triangle mr-2"></i>
-                        <strong>¡Advertencia!</strong> La cantidad a recibir excede el <?php echo $max_excedente_pct; ?>% autorizado.
-                        <br><small>Nota: Si el proveedor envió de más, Compras deberá gestionar la factura correspondiente.</small>
+                        <strong>¡Advertencia!</strong> La cantidad excede lo autorizado.
+                        <br><small>Si el proveedor envió de más, Compras deberá gestionar la factura complementaria.</small>
                     </div>
                     
                     <div class="alert alert-warning">
@@ -375,7 +407,7 @@ if ($idCotizacion_sel > 0) {
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-cancelar" data-dismiss="modal">Cancelar</button>
-                    <button type="submit" name="guardar_entrada" class="btn btn-guardar">
+                    <button type="submit" name="guardar_entrada" id="btnGuardar<?php echo $partida['idDetalle']; ?>" class="btn btn-guardar btn-lg">
                         <i class="fas fa-save mr-2"></i> Guardar Entrada
                     </button>
                 </div>
@@ -385,29 +417,57 @@ if ($idCotizacion_sel > 0) {
 </div>
 
 <script>
-function validarEntrada<?php echo $partida['idDetalle']; ?>() {
-    var cantidad = parseFloat(document.getElementById('cantidad<?php echo $partida['idDetalle']; ?>').value);
-    var autorizado = <?php echo $cantidad_autorizada; ?>;
+// Calcular monto estimado en tiempo real
+function calcularMonto(id, precioUnitario) {
+    var cantidad = parseFloat(document.getElementById('cantidad' + id).value) || 0;
+    var monto = cantidad * precioUnitario;
+    document.getElementById('montoEstimado' + id).value = '$' + monto.toFixed(2);
+    
+    // Mostrar/ocultar alerta de excedente
+    var autorizado = <?php echo $partida['cantidad_autorizada_real']; ?>;
     var maxExcedente = autorizado * (1 + <?php echo $max_excedente_pct; ?> / 100);
+    var alerta = document.getElementById('alertaExcedente' + id);
     
-    if (cantidad > maxExcedente) {
-        alert('La cantidad excede el máximo permitido del <?php echo $max_excedente_pct; ?>%. No se puede guardar.');
-        return false;
-    }
-    return true;
-}
-
-document.getElementById('cantidad<?php echo $partida['idDetalle']; ?>').addEventListener('input', function() {
-    var cantidad = parseFloat(this.value) || 0;
-    var autorizado = <?php echo $cantidad_autorizada; ?>;
-    var alerta = document.getElementById('alertaExcedente<?php echo $partida['idDetalle']; ?>');
-    
-    if (cantidad > autorizado * 1.<?php echo str_pad($max_excedente_pct, 2, '0', STR_PAD_LEFT); ?>) {
+    if (cantidad > autorizado) {
         alerta.style.display = 'block';
     } else {
         alerta.style.display = 'none';
     }
-});
+}
+
+// Validación y anti-doble click
+function validarYDesactivar(id) {
+    var cantidad = parseFloat(document.getElementById('cantidad' + id).value);
+    var maximo = parseFloat(document.getElementById('cantidad' + id).max);
+    var minimo = parseFloat(document.getElementById('cantidad' + id).min);
+    
+    // Validar rango
+    if (isNaN(cantidad) || cantidad < minimo) {
+        alert('La cantidad debe ser mayor a ' + minimo);
+        return false;
+    }
+    if (cantidad > maximo) {
+        alert('La cantidad no puede exceder ' + maximo.toFixed(6));
+        return false;
+    }
+    
+    // Validar 6 decimales máximo
+    var cantidadStr = document.getElementById('cantidad' + id).value;
+    if (cantidadStr.indexOf('.') !== -1) {
+        var decimales = cantidadStr.split('.')[1];
+        if (decimales && decimales.length > 6) {
+            alert('La cantidad no puede tener más de 6 decimales');
+            return false;
+        }
+    }
+    
+    // Deshabilitar botón para evitar doble click
+    var boton = document.getElementById('btnGuardar' + id);
+    boton.disabled = true;
+    boton.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Guardando...';
+    
+    return true;
+}
 </script>
 <?php endforeach; ?>
 
