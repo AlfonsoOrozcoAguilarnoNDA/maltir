@@ -208,6 +208,7 @@ CREATE TABLE respuesta_cotizacion (
     -- -50 = descontinuado
     autorizado VARCHAR(3) DEFAULT 'no', -- solo cambia no->si, nunca reversible
     cantidad_autorizada DECIMAL(14,6) DEFAULT 0, -- puede subir, NUNCA bajar
+    cantidad_recibida DECIMAL(14,6) DEFAULT 0, 
     fecha_autorizacion DATETIME DEFAULT NULL,
     usuario_autoriza VARCHAR(100),
     activo VARCHAR(3) DEFAULT 'si',
