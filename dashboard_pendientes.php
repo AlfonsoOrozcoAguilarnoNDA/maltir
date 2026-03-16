@@ -2,7 +2,7 @@
 /**
  * Proyecto MalTir - Sistema de Gestión de Compras por Cotización
  * 
- * Fecha: 15 de marzo de 2026
+ * Fecha: 16 de marzo de 2026
  * Programador: Alfonso Orozco Aguilar
  * Licencia: GNU Lesser General Public License v2.1 (LGPL 2.1)
  * 
@@ -20,8 +20,8 @@
  */
 
 // Modelo: KIMI 2.5
-// Módulo: Registro de Recepción Física de Mercancía
-// ACTUALIZADO: Ahora actualiza cantidad_recibida en respuesta_cotizacion para tracking por proveedor
+// Módulo: Dashboard Principal de Seguimiento de Compras Pendientes
+// Actualizado: Columna "Días Margen" agregada - positivo = a tiempo, negativo = atrasado
 ?>
 
 <?php require_once 'headerkimi.php'; ?>
@@ -31,148 +31,123 @@
 <div id="subcontainer">
 
 <?php
-$max_excedente_pct = 10;
-$mensaje = '';
-$tipo_mensaje = '';
-$idCotizacion_sel = isset($_POST['idCotizacion']) ? intval($_POST['idCotizacion']) : 0;
-$usuario_sanitizado = mysqli_real_escape_string($link, $session_usuario);
+// Procesar filtros
+$idProveedor_filtro = isset($_POST['idProveedor']) ? intval($_POST['idProveedor']) : 0;
+$fecha_desde = isset($_POST['fecha_desde']) ? $_POST['fecha_desde'] : '';
+$fecha_hasta = isset($_POST['fecha_hasta']) ? $_POST['fecha_hasta'] : '';
 
-// Procesar recepción con TRANSACCIÓN
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['guardar_entrada'])) {
-    
-    if (!isset($_POST['confirmo_presentacion'])) {
-        $mensaje = 'Debe confirmar que la presentación recibida corresponde a la solicitada.';
-        $tipo_mensaje = 'danger';
-    } else {
-        mysqli_begin_transaction($link);
-        
-        try {
-            $idCotizacion = intval($_POST['idCotizacion']);
-            $idRespuesta = intval($_POST['idRespuesta']); // Ahora usamos idRespuesta, no idDetalle
-            $cantidad_recibir = floatval($_POST['cantidad_recibir']);
-            
-            // Obtener datos de la respuesta específica del proveedor
-            $sql = "SELECT r.*, d.idDetalle, d.cantidad_recibida as total_recibido_detalle,
-                           a.idArticulo, a.existencia as existencia_actual
-                    FROM respuesta_cotizacion r
-                    JOIN cotizaciones_detalle d ON r.idDetalle = d.idDetalle
-                    JOIN cat_articulos a ON d.idArticulo = a.idArticulo
-                    WHERE r.idRespuesta = $idRespuesta AND r.autorizado = 'si' AND r.activo = 'si'
-                    FOR UPDATE";
-            $res = mysqli_query($link, $sql);
-            
-            if (!$res || !($respuesta = mysqli_fetch_assoc($res))) {
-                throw new Exception('Respuesta de proveedor no encontrada o no autorizada.');
-            }
-            
-            // Validar pendiente para ESTE proveedor específico
-            $cantidad_autorizada = $respuesta['cantidad_autorizada'];
-            $cantidad_recibida_actual = $respuesta['cantidad_recibida'];
-            $cantidad_pendiente = $cantidad_autorizada - $cantidad_recibida_actual;
-            
-            if ($cantidad_pendiente <= 0) {
-                throw new Exception('Esta partida ya fue recibida completamente de este proveedor.');
-            }
-            
-            // Validar excedente
-            $max_permitido = $cantidad_autorizada * (1 + ($max_excedente_pct / 100));
-            $nueva_cantidad_recibida_resp = $cantidad_recibida_actual + $cantidad_recibir;
-            
-            if ($nueva_cantidad_recibida_resp > $max_permitido) {
-                throw new Exception('La cantidad excede el máximo permitido del ' . $max_excedente_pct . '%.');
-            }
-            
-            // 1. Actualizar respuesta_cotizacion (tracking por proveedor)
-            $sql_resp = "UPDATE respuesta_cotizacion SET 
-                        cantidad_recibida = $nueva_cantidad_recibida_resp,
-                        ultima_actualizacion = CONVERT_TZ(NOW(),'UTC','America/Mexico_City'),
-                        usuario_modifica = '$usuario_sanitizado'
-                        WHERE idRespuesta = $idRespuesta";
-            
-            if (!mysqli_query($link, $sql_resp)) {
-                throw new Exception('Error al actualizar respuesta: ' . mysqli_error($link));
-            }
-            
-            // 2. Actualizar cotizaciones_detalle (acumulado total)
-            $idDetalle = $respuesta['idDetalle'];
-            $nuevo_total_detalle = $respuesta['total_recibido_detalle'] + $cantidad_recibir;
-            
-            $sql_det = "UPDATE cotizaciones_detalle SET 
-                       cantidad_recibida = $nuevo_total_detalle,
-                       fecha_recibida = CONVERT_TZ(NOW(),'UTC','America/Mexico_City'),
-                       ultima_actualizacion = CONVERT_TZ(NOW(),'UTC','America/Mexico_City'),
-                       usuario_modifica = '$usuario_sanitizado'
-                       WHERE idDetalle = $idDetalle";
-            
-            if (!mysqli_query($link, $sql_det)) {
-                throw new Exception('Error al actualizar detalle: ' . mysqli_error($link));
-            }
-            
-            // 3. Registrar en kardex
-            $idArticulo = $respuesta['idArticulo'];
-            $referencia = 'Cot ' . $idCotizacion . ' - Prov ' . $respuesta['idProveedor'];
-            
-            $sql_kardex = "INSERT INTO kardex 
-                          (idArticulo, tipo_movimiento, cantidad, referencia, comentario, fecha_movimiento, usuario_alta)
-                          VALUES 
-                          ($idArticulo, 'entrada', $cantidad_recibir, '$referencia', 
-                           'Recepción cotización $idCotizacion, respuesta #$idRespuesta',
-                           CONVERT_TZ(NOW(),'UTC','America/Mexico_City'), '$usuario_sanitizado')";
-            
-            if (!mysqli_query($link, $sql_kardex)) {
-                throw new Exception('Error al registrar kardex: ' . mysqli_error($link));
-            }
-            
-            // 4. Actualizar existencia en cat_articulos
-            $nueva_existencia = $respuesta['existencia_actual'] + $cantidad_recibir;
-            
-            $sql_exist = "UPDATE cat_articulos SET 
-                          existencia = $nueva_existencia,
-                          ultima_compra = CONVERT_TZ(NOW(),'UTC','America/Mexico_City'),
-                          ultima_actualizacion = CONVERT_TZ(NOW(),'UTC','America/Mexico_City'),
-                          usuario_modifica = '$usuario_sanitizado'
-                          WHERE idArticulo = $idArticulo";
-            
-            if (!mysqli_query($link, $sql_exist)) {
-                throw new Exception('Error al actualizar existencia: ' . mysqli_error($link));
-            }
-            
-            mysqli_commit($link);
-            $mensaje = 'Entrada registrada correctamente. Cantidad: ' . number_format($cantidad_recibir, 6);
-            $tipo_mensaje = 'success';
-            
-        } catch (Exception $e) {
-            mysqli_rollback($link);
-            $mensaje = $e->getMessage();
-            $tipo_mensaje = 'danger';
-        }
-    }
+// Construir WHERE base
+$where = "WHERE d.activo = 'si' AND d.comprar = 'si' AND d.cantidad_recibida < d.cantidad_autorizada";
+
+if ($idProveedor_filtro > 0) {
+    $where .= " AND r.idProveedor = $idProveedor_filtro";
+}
+if ($fecha_desde) {
+    $where .= " AND d.fecha_requerida >= '$fecha_desde'";
+}
+if ($fecha_hasta) {
+    $where .= " AND d.fecha_requerida <= '$fecha_hasta'";
 }
 
-// Obtener partidas pendientes por PROVEEDOR (respuesta_cotizacion)
-$partidas_pendientes = [];
+// Obtener partidas pendientes
+$sql = "SELECT d.*, 
+        a.nombre as articulo_nombre, 
+        u.idUnidadMedida,
+        p.nombre as proveedor_nombre,
+        c.idCotizacion,
+        c.comentario as cotizacion_comentario,
+        r.precio_total,
+        r.cantidad_cotizada,
+        r.ajuste,
+        r.fecha_comprometida
+        FROM cotizaciones_detalle d
+        JOIN cat_articulos a ON d.idArticulo = a.idArticulo
+        JOIN cat_unidades_medida u ON d.idUnidadMedida = u.idUnidadMedida
+        JOIN cotizaciones_maestro c ON d.idCotizacion = c.idCotizacion
+        JOIN respuesta_cotizacion r ON d.idDetalle = r.idDetalle AND r.autorizado = 'si' AND r.activo = 'si'
+        JOIN cat_proveedores p ON r.idProveedor = p.idProveedor
+        $where
+        ORDER BY d.fecha_requerida ASC";
 
-if ($idCotizacion_sel > 0) {
-    $sql = "SELECT r.*, d.idCotizacion, d.fecha_requerida, d.cantidad_solicitada,
-                   a.nombre as articulo_nombre, a.idArticulo,
-                   u.idUnidadMedida,
-                   p.nombre as proveedor_nombre
-            FROM respuesta_cotizacion r
-            JOIN cotizaciones_detalle d ON r.idDetalle = d.idDetalle AND d.activo = 'si'
-            JOIN cat_articulos a ON d.idArticulo = a.idArticulo
-            JOIN cat_unidades_medida u ON d.idUnidadMedida = u.idUnidadMedida
-            JOIN cat_proveedores p ON r.idProveedor = p.idProveedor
-            WHERE d.idCotizacion = $idCotizacion_sel
-            AND r.autorizado = 'si'
-            AND r.activo = 'si'
-            AND r.cantidad_recibida < r.cantidad_autorizada
-            ORDER BY d.idDetalle, r.idProveedor";
+$res = mysqli_query($link, $sql);
+
+// Calcular estatus basado en reglas
+function calcularEstatus($fecha_requerida, $fecha_comprometida, $fecha_recibida, $ajuste, $idArticulo, $idProveedor, $link) {
+    $hoy = new DateTime();
+    $fecha_req = new DateTime($fecha_requerida);
+    $dias_para_requerida = $hoy->diff($fecha_req)->days;
+    $es_pasado = $hoy > $fecha_req;
     
-    $res = mysqli_query($link, $sql);
-    while ($row = mysqli_fetch_assoc($res)) {
-        $row['cantidad_pendiente'] = $row['cantidad_autorizada'] - $row['cantidad_recibida'];
-        $row['precio_unitario'] = $row['precio_total'] / $row['cantidad_cotizada'];
-        $partidas_pendientes[] = $row;
+    // Si ya tiene ajuste positivo (excedente/urgente) = avión
+    if ($ajuste > 0) {
+        return ['clase' => 'status-avion', 'icono' => 'fa-plane', 'texto' => 'Envío urgente aéreo', 'color_fila' => 'table-warning'];
+    }
+    
+    // Calcular si llegará a tiempo basado en historial kardex
+    $dias_promedio = null;
+    $sql_hist = "SELECT AVG(DATEDIFF(k.fecha_movimiento, r.fecha_autorizacion)) as dias_promedio
+                 FROM kardex k
+                 JOIN cotizaciones_detalle d ON k.idArticulo = d.idArticulo
+                 JOIN respuesta_cotizacion r ON d.idDetalle = r.idDetalle
+                 WHERE k.idArticulo = $idArticulo AND r.idProveedor = $idProveedor
+                 AND k.tipo_movimiento = 'entrada' AND r.fecha_autorizacion IS NOT NULL
+                 HAVING dias_promedio IS NOT NULL";
+    $res_hist = mysqli_query($link, $sql_hist);
+    if ($res_hist && $row_hist = mysqli_fetch_assoc($res_hist)) {
+        $dias_promedio = ceil(abs($row_hist['dias_promedio']));
+    }
+    
+    // Si por historial no llegará a tiempo = bomba
+    if ($dias_promedio !== null && $fecha_comprometida) {
+        $fecha_comp = new DateTime($fecha_comprometida);
+        $dias_necesarios = $hoy->diff($fecha_comp)->days;
+        
+        if ($dias_necesarios < $dias_promedio && !$es_pasado) {
+            return ['clase' => 'status-bomba', 'icono' => 'fa-bomb', 'texto' => 'Va a estallar - no llegará', 'color_fila' => 'table-danger'];
+        }
+    }
+    
+    // Si faltan 7 días o menos = warning
+    if ($dias_para_requerida <= 7 && !$es_pasado) {
+        return ['clase' => 'status-warning', 'icono' => 'fa-exclamation-circle', 'texto' => 'Faltan ' . $dias_para_requerida . ' días', 'color_fila' => 'table-warning'];
+    }
+    
+    // Si ya pasó la fecha requerida y no se recibió = bomba
+    if ($es_pasado && !$fecha_recibida) {
+        return ['clase' => 'status-bomba', 'icono' => 'fa-bomb', 'texto' => 'Vencido - no recibido', 'color_fila' => 'table-danger'];
+    }
+    
+    // Default = ok
+    return ['clase' => 'status-ok', 'icono' => 'fa-check', 'texto' => 'A tiempo', 'color_fila' => ''];
+}
+
+// Calcular días margen (nueva función)
+function calcularDiasMargen($fecha_comprometida, $fecha_requerida) {
+    $hoy = new DateTime();
+    
+    // Si hay fecha comprometida, calcular respecto a esa
+    if ($fecha_comprometida) {
+        $fecha_comp = new DateTime($fecha_comprometida);
+        $diff = $hoy->diff($fecha_comp);
+        $dias = $diff->days;
+        
+        // Si hoy > fecha comprometida = negativo (atrasado)
+        if ($hoy > $fecha_comp) {
+            return -$dias; // Negativo = días de atraso
+        } else {
+            return $dias; // Positivo = días de margen
+        }
+    }
+    
+    // Si no hay fecha comprometida, calcular respecto a fecha requerida
+    $fecha_req = new DateTime($fecha_requerida);
+    $diff = $hoy->diff($fecha_req);
+    $dias = $diff->days;
+    
+    if ($hoy > $fecha_req) {
+        return -$dias; // Negativo = días de atraso vs requerida
+    } else {
+        return $dias; // Positivo = días de margen vs requerida
     }
 }
 ?>
@@ -180,187 +155,173 @@ if ($idCotizacion_sel > 0) {
 <div class="container-fluid">
     
     <div class="card card-modulo mb-4">
-        <div class="card-header">
-            <i class="fas fa-dolly mr-2"></i> Entrada de Mercancía
+        <div class="card-header bg-primary text-white">
+            <i class="fas fa-tachometer-alt mr-2"></i> Dashboard de Partidas Pendientes
         </div>
         <div class="card-body">
             
-            <?php if ($mensaje): ?>
-            <div class="alert alert-<?php echo $tipo_mensaje; ?> alert-sistema">
-                <i class="fas fa-info-circle mr-2"></i> <?php echo $mensaje; ?>
-            </div>
-            <?php endif; ?>
-            
-            <!-- Búsqueda de Cotización -->
+            <!-- Filtros -->
             <form method="POST" class="form-sistema mb-4">
                 <div class="row">
-                    <div class="col-md-6">
+                    <div class="col-md-4">
                         <div class="form-group">
-                            <label>Número de Cotización <span class="text-danger">*</span></label>
-                            <div class="input-group">
-                                <input type="number" name="idCotizacion" class="form-control" 
-                                       value="<?php echo $idCotizacion_sel; ?>" 
-                                       placeholder="Ingrese número de cotización" required>
-                                <div class="input-group-append">
-                                    <button type="submit" class="btn btn-guardar">
-                                        <i class="fas fa-search mr-2"></i> Buscar
-                                    </button>
-                                </div>
-                            </div>
+                            <label>Proveedor</label>
+                            <select name="idProveedor" class="form-control custom-select" onchange="this.form.submit()">
+                                <option value="0">Todos los proveedores</option>
+                                <?php
+                                $res_prov = mysqli_query($link, "SELECT DISTINCT p.idProveedor, p.nombre 
+                                                                 FROM cat_proveedores p
+                                                                 JOIN respuesta_cotizacion r ON p.idProveedor = r.idProveedor
+                                                                 JOIN cotizaciones_detalle d ON r.idDetalle = d.idDetalle
+                                                                 WHERE d.comprar = 'si' AND d.cantidad_recibida < d.cantidad_autorizada
+                                                                 AND p.activo = 'si' ORDER BY p.nombre");
+                                while ($row = mysqli_fetch_assoc($res_prov)) {
+                                    $selected = ($idProveedor_filtro == $row['idProveedor']) ? 'selected' : '';
+                                    echo '<option value="' . $row['idProveedor'] . '" ' . $selected . '>' . htmlspecialchars($row['nombre']) . '</option>';
+                                }
+                                ?>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="form-group">
+                            <label>Fecha Requerida Desde</label>
+                            <input type="datetime-local" name="fecha_desde" class="form-control" value="<?php echo $fecha_desde; ?>" onchange="this.form.submit()">
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="form-group">
+                            <label>Fecha Requerida Hasta</label>
+                            <input type="datetime-local" name="fecha_hasta" class="form-control" value="<?php echo $fecha_hasta; ?>" onchange="this.form.submit()">
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="form-group">
+                            <label>&nbsp;</label>
+                            <button type="submit" class="btn btn-guardar btn-block">
+                                <i class="fas fa-filter mr-2"></i> Filtrar
+                            </button>
                         </div>
                     </div>
                 </div>
             </form>
             
-            <?php if ($idCotizacion_sel > 0): ?>
-                
-                <?php if (count($partidas_pendientes) == 0): ?>
-                    <div class="alert alert-info alert-sistema">
-                        <i class="fas fa-info-circle mr-2"></i> No hay partidas pendientes de recepción para esta cotización.
-                    </div>
-                <?php else: ?>
-                    
-                    <h5 class="mb-3">
-                        <i class="fas fa-clipboard-list mr-2"></i> 
-                        Partidas Pendientes - Cotización #<?php echo $idCotizacion_sel; ?>
-                    </h5>
-                    
-                    <div class="table-responsive">
-                        <table class="table table-sistema">
-                            <thead>
-                                <tr>
-                                    <th>Partida</th>
-                                    <th>Proveedor</th>
-                                    <th>Artículo</th>
-                                    <th>Autorizado</th>
-                                    <th>Recibido</th>
-                                    <th>Pendiente</th>
-                                    <th>Precio Unit.</th>
-                                    <th>Acción</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($partidas_pendientes as $item): ?>
-                                <tr>
-                                    <td><?php echo $item['idDetalle']; ?></td>
-                                    <td><?php echo htmlspecialchars($item['proveedor_nombre']); ?></td>
-                                    <td><?php echo htmlspecialchars($item['articulo_nombre']); ?></td>
-                                    <td><?php echo number_format($item['cantidad_autorizada'], 6) . ' ' . $item['idUnidadMedida']; ?></td>
-                                    <td><?php echo number_format($item['cantidad_recibida'], 6); ?></td>
-                                    <td class="font-weight-bold text-primary"><?php echo number_format($item['cantidad_pendiente'], 6); ?></td>
-                                    <td>$<?php echo number_format($item['precio_unitario'], 2); ?></td>
-                                    <td>
-                                        <button type="button" class="btn btn-guardar btn-sm" 
-                                                data-toggle="modal" 
-                                                data-target="#modalEntrada<?php echo $item['idRespuesta']; ?>">
-                                            <i class="fas fa-plus mr-1"></i> Recibir
-                                        </button>
-                                    </td>
-                                </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    </div>
-                    
-                <?php endif; ?>
-                
-            <?php endif; ?>
+            <!-- Leyenda de colores -->
+            <div class="mb-3">
+                <span class="mr-3"><i class="fas fa-check text-success mr-1"></i> A tiempo</span>
+                <span class="mr-3"><i class="fas fa-exclamation-circle text-warning mr-1"></i> &lt; 7 días</span>
+                <span class="mr-3"><i class="fas fa-plane mr-1" style="color:#e67e22"></i> Envío aéreo</span>
+                <span><i class="fas fa-bomb text-danger mr-1"></i> Crítico</span>
+            </div>
+            
+            <!-- Leyenda de Días Margen -->
+            <div class="alert alert-secondary mb-3">
+                <i class="fas fa-info-circle mr-2"></i>
+                <strong>Días Margen:</strong> 
+                <span class="text-success font-weight-bold">Positivo</span> = días de margen antes de fecha comprometida. 
+                <span class="text-danger font-weight-bold">Negativo</span> = días de atraso después de fecha comprometida.
+            </div>
+            
+            <!-- Tabla de Pendientes -->
+            <div class="table-responsive">
+                <table class="table table-sistema">
+                    <thead>
+                        <tr>
+                            <th>Estatus</th>
+                            <th>Cotización</th>
+                            <th>Artículo</th>
+                            <th>Proveedor</th>
+                            <th>Cantidad Pendiente</th>
+                            <th>Importe Estimado</th>
+                            <th>Fecha Requerida</th>
+                            <th>Fecha Comprometida</th>
+                            <th>Días Margen</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php
+                        $total_importe = 0;
+                        while ($row = mysqli_fetch_assoc($res)) {
+                            $cantidad_pendiente = $row['cantidad_autorizada'] - $row['cantidad_recibida'];
+                            $precio_unitario = $row['precio_total'] / $row['cantidad_cotizada'];
+                            $importe_estimado = $precio_unitario * $cantidad_pendiente;
+                            $total_importe += $importe_estimado;
+                            
+                            $estatus = calcularEstatus($row['fecha_requerida'], $row['fecha_comprometida'], $row['fecha_recibida'], $row['ajuste'], $row['idArticulo'], $row['idProveedor'], $link);
+                            
+                            // Calcular días margen
+                            $dias_margen = calcularDiasMargen($row['fecha_comprometida'], $row['fecha_requerida']);
+                            
+                            // Clase para días margen
+                            if ($dias_margen > 7) {
+                                $clase_margen = 'text-success font-weight-bold';
+                                $icono_margen = '<i class="fas fa-arrow-up mr-1"></i>';
+                            } elseif ($dias_margen > 0) {
+                                $clase_margen = 'text-warning font-weight-bold';
+                                $icono_margen = '<i class="fas fa-clock mr-1"></i>';
+                            } else {
+                                $clase_margen = 'text-danger font-weight-bold';
+                                $icono_margen = '<i class="fas fa-arrow-down mr-1"></i>';
+                            }
+                            
+                            echo '<tr class="' . $estatus['color_fila'] . '">';
+                            echo '<td class="text-center">';
+                            echo '<i class="fas ' . $estatus['icono'] . ' ' . $estatus['clase'] . '" style="font-size:1.3rem;" title="' . $estatus['texto'] . '"></i>';
+                            echo '</td>';
+                            echo '<td class="font-weight-bold">#' . $row['idCotizacion'] . '</td>';
+                            echo '<td>' . htmlspecialchars($row['articulo_nombre']) . '</td>';
+                            echo '<td>' . htmlspecialchars($row['proveedor_nombre']) . '</td>';
+                            echo '<td class="font-weight-bold">' . number_format($cantidad_pendiente, 6) . ' ' . $row['idUnidadMedida'] . '</td>';
+                            echo '<td class="text-right">$' . number_format($importe_estimado, 2) . '</td>';
+                            echo '<td>' . date('d/m/Y', strtotime($row['fecha_requerida'])) . '</td>';
+                            echo '<td>' . ($row['fecha_comprometida'] ? date('d/m/Y', strtotime($row['fecha_comprometida'])) : '-') . '</td>';
+                            
+                            // Nueva columna: Días Margen
+                            echo '<td class="' . $clase_margen . '">';
+                            echo $icono_margen . $dias_margen;
+                            if ($dias_margen > 0) {
+                                echo ' <small>días</small>';
+                            } else {
+                                echo ' <small>días atraso</small>';
+                            }
+                            echo '</td>';
+                            
+                            echo '<td>';
+                            echo '<form method="POST" action="generar_correo.php" style="display:inline;">';
+                            echo '<input type="hidden" name="idCotizacion" value="' . $row['idCotizacion'] . '">';
+                            echo '<button type="submit" class="btn btn-info btn-sm">';
+                            echo '<i class="fas fa-envelope mr-1"></i> Generar correo';
+                            echo '</button>';
+                            echo '</form>';
+                            echo '</td>';
+                            echo '</tr>';
+                        }
+                        
+                        if (mysqli_num_rows($res) == 0) {
+                            echo '<tr><td colspan="10" class="text-center text-muted py-4">';
+                            echo '<i class="fas fa-check-circle fa-3x mb-3 text-success"></i><br>';
+                            echo 'No hay partidas pendientes de recepción';
+                            echo '</td></tr>';
+                        }
+                        ?>
+                    </tbody>
+                    <?php if (mysqli_num_rows($res) > 0): ?>
+                    <tfoot class="thead-light">
+                        <tr>
+                            <td colspan="5" class="text-right font-weight-bold">Total Importe Estimado:</td>
+                            <td class="text-right font-weight-bold text-primary">$<?php echo number_format($total_importe, 2); ?></td>
+                            <td colspan="4"></td>
+                        </tr>
+                    </tfoot>
+                    <?php endif; ?>
+                </table>
+            </div>
             
         </div>
     </div>
     
 </div>
-
-<!-- Modales -->
-<?php foreach ($partidas_pendientes as $item): 
-    $max_permitido = $item['cantidad_autorizada'] * (1 + ($max_excedente_pct / 100));
-?>
-<div class="modal fade" id="modalEntrada<?php echo $item['idRespuesta']; ?>" tabindex="-1" role="dialog" aria-hidden="true">
-    <div class="modal-dialog modal-lg" role="document">
-        <div class="modal-content">
-            <form method="POST" onsubmit="return validarYDesactivar(<?php echo $item['idRespuesta']; ?>)">
-                <div class="modal-header bg-success text-white">
-                    <h5 class="modal-title"><i class="fas fa-dolly mr-2"></i> Registrar Entrada</h5>
-                    <button type="button" class="close text-white" data-dismiss="modal"><span>&times;</span></button>
-                </div>
-                <div class="modal-body">
-                    
-                    <input type="hidden" name="idCotizacion" value="<?php echo $idCotizacion_sel; ?>">
-                    <input type="hidden" name="idRespuesta" value="<?php echo $item['idRespuesta']; ?>">
-                    
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="alert alert-info">
-                                <strong>Proveedor:</strong> <?php echo htmlspecialchars($item['proveedor_nombre']); ?><br>
-                                <strong>Artículo:</strong> <?php echo htmlspecialchars($item['articulo_nombre']); ?><br>
-                                <strong>Autorizado:</strong> <?php echo number_format($item['cantidad_autorizada'], 6); ?><br>
-                                <strong>Ya Recibido:</strong> <?php echo number_format($item['cantidad_recibida'], 6); ?><br>
-                                <strong class="text-primary">Pendiente:</strong> <?php echo number_format($item['cantidad_pendiente'], 6); ?>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="alert alert-warning">
-                                <strong>Precio Unitario:</strong> $<?php echo number_format($item['precio_unitario'], 2); ?><br>
-                                <strong>Monto Estimado:</strong> 
-                                <span class="h4 text-primary">$<?php echo number_format($item['precio_unitario'] * $item['cantidad_pendiente'], 2); ?></span>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="form-group">
-                                <label>Cantidad a Recibir <span class="text-danger">*</span></label>
-                                <input type="number" name="cantidad_recibir" id="cantidad<?php echo $item['idRespuesta']; ?>" 
-                                       class="form-control form-control-lg" step="0.000001" 
-                                       min="0.000001" max="<?php echo $max_permitido; ?>" required
-                                       oninput="calcularMonto(<?php echo $item['idRespuesta']; ?>, <?php echo $item['precio_unitario']; ?>)">
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="form-group">
-                                <label>Monto Estimado</label>
-                                <input type="text" id="monto<?php echo $item['idRespuesta']; ?>" 
-                                       class="form-control form-control-lg bg-light text-primary font-weight-bold" 
-                                       readonly value="$0.00">
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="alert alert-warning">
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" name="confirmo_presentacion" required>
-                            <label class="form-check-label">
-                                <strong>Confirmo que la presentación recibida corresponde a la solicitada</strong>
-                            </label>
-                        </div>
-                    </div>
-                    
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-cancelar" data-dismiss="modal">Cancelar</button>
-                    <button type="submit" name="guardar_entrada" id="btn<?php echo $item['idRespuesta']; ?>" class="btn btn-guardar btn-lg">
-                        <i class="fas fa-save mr-2"></i> Guardar
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-
-<script>
-function calcularMonto(id, precio) {
-    var cantidad = parseFloat(document.getElementById('cantidad' + id).value) || 0;
-    document.getElementById('monto' + id).value = '$' + (cantidad * precio).toFixed(2);
-}
-function validarYDesactivar(id) {
-    var btn = document.getElementById('btn' + id);
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Guardando...';
-    return true;
-}
-</script>
-<?php endforeach; ?>
 
 </div>
 
