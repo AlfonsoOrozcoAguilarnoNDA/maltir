@@ -139,6 +139,22 @@ y que **ningún usuario operativo puede modificar**:
 * 1 - De momento hay un parpadeo en las altas de catálogos. Probablente  es asunto de editar un FADE.
 * 2 - Cerrar Cotización tiene el mismo parpadeo en el modal
 
+* ## Contexto y dónde estamos
+
+El foco de hoy era el *benchmarking* de Kimi más que el código en sí. Es un modelo que se siente “verde” en ejecución (el parpadeo de los modales o el olvido de sanitizar), pero puede ser superior en lógica pura de negocio si se le guía con el mapa correcto (el documento central).
+
+## El factor *Context Window*
+
+El éxito de los 19 *chunks* dependió de la “memoria externa” (el `.docx`) y no de la memoria de la sesión de Kimi. Es una lección vital para usar modelos gratuitos.
+
+## Soberanía tecnológica
+
+Refuerza la idea de por qué elegimos PHP 8.x procedural. En un mundo obsesionado con dependencias de NPM, el enfoque de “archivo único por módulo” es lo que permite que el sistema sea auditable y resiliente.  
+
+Es casi imposible lograr este nivel de calidad con **Laravel** o **Symfony**, y si fueran compras de sector salud no lo podríamos hacer por trazabilidad y dependencias no auditables.
+
+https://vibecodingmexico.com/laboratorio-2-sistema-de-compras/ se ve el estado actual.
+
 ---
 ## Observación sobre crear cotización
 
@@ -148,7 +164,7 @@ Existe el riesgo de que la persona trate de hacer dos cotizaciones a la vez, lo 
 
 **Sugerencia:** usar dos navegadores diferentes, aunque esto también se presta a errores.
 
-Esti puedemanejarse en una iteración posterior.
+Esto puede manejarse en una iteración posterior.
 
 ---
 ## ⚠️ Nota sobre la Configuración del Servidor (Timezones)
@@ -200,12 +216,15 @@ Este proyecto se distribuye bajo la licencia **LGPL 2.1**.
 - **Sitio Web:** [vibecodingmexico.com](https://vibecodingmexico.com)
 - **Facebook:** [Alfonso Orozco Aguilar](https://www.facebook.com/alfonso.orozcoaguilar)
 
-## Visuales del Laboratorio 2 (Kimi 2.5)
-Catálogo de Unidades de Medida
-![Catálogo de Unidades](pantallaunidades.png)
+## Algunos Visuales del Laboratorio 2 (Kimi 2.5)
+Pantalla 1
+![Pantalla capturas entrada](pantallacapturaentrada.png)
 
-Catálogo de Incoterms 2020
-![Catálogo de Incoterms](pantallaincoterms.png)
+Pantalla 2
+![Pantalla captura respuesta](pantallacapturarespuesta.png)
+
+Pantalla 3
+![Pantalla consulta cotizacion](pantallaconsultacotizacion.png)
 
 Catálogo de Proveedores
 ![Catálogo de Proveedores](pantallaproveedores.png)
