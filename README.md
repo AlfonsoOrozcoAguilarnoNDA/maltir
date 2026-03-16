@@ -90,6 +90,9 @@ Se haran cambios necesarios encódigo y se documentaran en vibecodingmexico.com
 | 18 | `generar_correo.php` | Texto listo para Outlook/Gmail |
 | 19 | `reporte_entrega.php` | Reporte imprimible por cotización |
 
+Se destaca que se organiza de este modo para que si hay un nuevo requisito,
+digamos un nuevo campo de proveedores, se puedadecir a kimi, porfavor regenera el chunk 8
+
 ---
 
 ## 🔒 Puntos de Control (No Alterables por Usuarios)
@@ -134,6 +137,17 @@ y que **ningún usuario operativo puede modificar**:
   o leyes aplicables — esta es una prueba de concepto
 
 1 - De momento hay un parpadeo en las altas de catálogos. Probablente  esasunto de editar un FADE.
+
+---
+## Observación sobre crear cotización
+
+El **crear cotización** tiene un problema: el comportamiento humano. Nuestros usuarios pueden estar distraídos, pero además el sistema expira por tiempo y el recolector de basura de PHP, lo cual tendríamos que explicar en una capacitación.  
+
+Existe el riesgo de que la persona trate de hacer dos cotizaciones a la vez, lo cual es peligroso y descuidado. El comportamiento descuidado es del usuario.  
+
+**Sugerencia:** usar dos navegadores diferentes, aunque esto también se presta a errores.
+
+Esti puedemanejarse en una iteración posterior.
 
 ---
 
