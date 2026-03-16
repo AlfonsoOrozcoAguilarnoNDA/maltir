@@ -2,7 +2,7 @@
 /**
  * Proyecto MalTir - Sistema de Gestión de Compras por Cotización
  * 
- * Fecha: 15 de marzo de 2026
+ * Fecha: 16 de marzo de 2026
  * Programador: Alfonso Orozco Aguilar
  * Licencia: GNU Lesser General Public License v2.1 (LGPL 2.1)
  * 
