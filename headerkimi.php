@@ -198,6 +198,7 @@ mysqli_query($link, "SET sql_mode = ''");
                     </a>
                     <div class="dropdown-menu" aria-labelledby="menuUsuario">
                         <a class="dropdown-item" href="crearcotizacion.php"><i class="fas fa-file-alt"></i> Crear Cotización</a>
+                        <a class="dropdown-item" href="capturarrespuestacotizacion.php"><i class="fas fa-file-signature"></i> Capturar Respuesta</a>
                         <a class="dropdown-item" href="consulta_cotizaciones.php"><i class="fas fa-search"></i> Consultar Cotizaciones</a>
                         <a class="dropdown-item" href="dashboard_pendientes.php"><i class="fas fa-tachometer-alt"></i> Dashboard Pendientes</a>
                     </div>
