@@ -196,10 +196,11 @@ mysqli_query($link, "SET sql_mode = ''");
                     <a class="nav-link dropdown-toggle" href="#" id="menuUsuario" role="button" data-toggle="dropdown">
                         <i class="fas fa-briefcase mr-1"></i> Operaciones
                     </a>                    
-                    <div class="dropdown-menu" aria-labelledby="menuUsuario">
+                   <div class="dropdown-menu" aria-labelledby="menuUsuario">
     <a class="dropdown-item" href="crearcotizacion.php"><i class="fas fa-file-alt"></i> Crear Cotización</a>
     <a class="dropdown-item" href="consulta_cotizaciones.php"><i class="fas fa-search"></i> Consultar Cotizaciones</a>
     <a class="dropdown-item" href="capturarrespuestacotizacion.php"><i class="fas fa-file-signature"></i> Capturar Respuesta</a>
+    <a class="dropdown-item" href="entradamercancia.php"><i class="fas fa-truck-loading"></i> Entrada de Mercancía</a>
     <a class="dropdown-item" href="cerrarcotizacion.php"><i class="fas fa-lock"></i> Cerrar Cotización</a>
     <a class="dropdown-item" href="dashboard_pendientes.php"><i class="fas fa-tachometer-alt"></i> Dashboard Pendientes</a>
 </div>
