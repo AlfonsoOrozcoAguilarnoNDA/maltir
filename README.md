@@ -150,6 +150,18 @@ Existe el riesgo de que la persona trate de hacer dos cotizaciones a la vez, lo 
 Esti puedemanejarse en una iteración posterior.
 
 ---
+## ⚠️ Nota sobre la Configuración del Servidor (Timezones)
+
+La lógica de auditoría y marcado de tiempo de este módulo utiliza la función `CONVERT_TZ()` de MariaDB/MySQL para garantizar la precisión horaria en **Mexico City**.  
+
+Es posible que los resultados devuelvan valores `NULL` si las tablas de zona horaria del sistema no han sido cargadas en el motor de base de datos.  
+
+Para asegurar la integridad de los registros de autorización, se recomienda verificar la disponibilidad de estas tablas o instalarlas ejecutando el siguiente comando en la terminal del servidor (Linux):
+
+```bash
+mysql_tzinfo_to_sql /usr/share/zoneinfo | mysql -u root -p mysql
+
+---
 
 ## 🧪 Notas del Autor (Bitácora de Vibe Coding)
 
