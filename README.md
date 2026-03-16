@@ -143,6 +143,8 @@ y que **ningún usuario operativo puede modificar**:
 
 El foco de hoy era el *benchmarking* de Kimi más que el código en sí. Es un modelo que se siente “verde” en ejecución (el parpadeo de los modales o el olvido de sanitizar), pero puede ser superior en lógica pura de negocio si se le guía con el mapa correcto (el documento central).
 
+**Lo que yo noto es que si se puede trabajar con kimi y que ayuda muchisimo el proceso de chunks, pero está un poco verde en ejecución. Es mejor en lógica. El sistema como esta de momento esta "dañado" pero funcional en un 80%.**
+
 ## El factor *Context Window*
 
 El éxito de los 19 *chunks* dependió de la “memoria externa” (el `.docx`) y no de la memoria de la sesión de Kimi. Es una lección vital para usar modelos gratuitos.
