@@ -1,22 +1,27 @@
 <?php
-// Modelo: KIMI 2.5
-// Módulo: Cierre Formal de Cotización con Ajustes
 /**
  * Proyecto MalTir - Sistema de Gestión de Compras por Cotización
- * * Fecha: 15 de marzo de 2026
- * Programador: Alfonso Orozco Aguilar
+ * 
+ * Fecha: 15 de marzo de 2026
+ * Programador: Alfonso Orozco Aguilarc
  * Licencia: GNU Lesser General Public License v2.1 (LGPL 2.1)
- * * Este archivo forma parte del experimento de Vibe Coding "MalTir" (Prudencia),
+ * 
+ * Este archivo forma parte del experimento de Vibe Coding "MalTir" (Prudencia),
  * diseñado para evaluar la coherencia lógica de Kimi 2.5 en entornos transaccionales.
  * La lógica de negocio está basada en el sistema original de 2006 (VB6 + SQL 2000).
- * * Repositorio Oficial (Versión más reciente): 
- * https://github.com/AlfonsoOrozcoAguilarnoNDA/maltir
- * * Más información, bitácoras y resultados del experimento en:
- * https://vibecodingmexico.com/?s=maltir
- * * "Los datos no mienten, las personas sí."
+ * 
+ * Repositorio Oficial (Versión más reciente): 
+ * https://github.com/AlfonsoOrozcoAguilarnoNDA/maltir 
+ * 
+ * Más información, bitácoras y resultados del experimento en:
+ * https://vibecodingmexico.com/?s=maltir 
+ * 
+ * "Los datos no mienten, las personas sí."
  */
 
-
+// Modelo: KIMI 2.5
+// Módulo: Crear Cotización con Partidas
+// VERSIÓN ROBUSTA: Usa campo hidden + fallback a sesión para cPanel/hospedaje compartido
 ?>
 
 <?php require_once 'headerkimi.php'; ?>
@@ -26,350 +31,391 @@
 <div id="subcontainer">
 
 <?php
+$usuario_sanitizado = mysqli_real_escape_string($link, $session_usuario);
 $mensaje = '';
 $tipo_mensaje = '';
 
-// Procesar cierre definitivo
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirmar_cierre'])) {
-    $idCotizacion = intval($_POST['idCotizacion']);
-    $motivo_cierre = mysqli_real_escape_string($link, $_POST['motivo_cierre']);
-    $hubo_incidencia = mysqli_real_escape_string($link, $_POST['hubo_incidencia']);
-    $descripcion_incidencia = mysqli_real_escape_string($link, $_POST['descripcion_incidencia'] ?? '');
+// Procesar POST - DESPUÉS de tener $link y $session_usuario disponibles
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
-    // Validar que si hay incidencia, tenga descripción
-    if ($hubo_incidencia == 'si' && empty($descripcion_incidencia)) {
-        $mensaje = 'Debe describir la incidencia cuando indica que hubo una.';
-        $tipo_mensaje = 'danger';
-    } else {
-        // Actualizar cotización maestro
+    // Confirmar cotización (guardar definitivamente)
+    if (isset($_POST['confirmar_cotizacion']) && isset($_POST['idCotizacion_temp'])) {
+        $idCotizacion = intval($_POST['idCotizacion_temp']);
+        
         $sql = "UPDATE cotizaciones_maestro SET 
-                cerrada = 'si',
-                fecha_cierre = CONVERT_TZ(NOW(),'UTC','America/Mexico_City'),
-                motivo_cierre = '$motivo_cierre',
-                hubo_incidencia = '$hubo_incidencia',
-                descripcion_incidencia = '$descripcion_incidencia',
+                fecha_cotizacion = CONVERT_TZ(NOW(),'UTC','America/Mexico_City'),
                 ultima_actualizacion = CONVERT_TZ(NOW(),'UTC','America/Mexico_City'),
-                usuario_modifica = '$session_usuario'
+                usuario_modifica = '$usuario_sanitizado'
                 WHERE idCotizacion = $idCotizacion";
+        mysqli_query($link, $sql);
         
-        if (mysqli_query($link, $sql)) {
-            $mensaje = 'Cotización cerrada correctamente. Esta acción es IRREVERSIBLE.';
-            $tipo_mensaje = 'success';
-            unset($_POST['idCotizacion']); // Limpiar selección
-        } else {
-            $mensaje = 'Error al cerrar: ' . mysqli_error($link);
-            $tipo_mensaje = 'danger';
-        }
+        $mensaje = 'Cotización confirmada correctamente. Número: <strong>' . $idCotizacion . '</strong>';
+        $tipo_mensaje = 'success';
+        unset($_SESSION['cotizacion_temp']);
     }
-}
-
-// Procesar guardado de ajustes (antes del cierre)
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['guardar_ajuste'])) {
-    $idRespuesta = intval($_POST['idRespuesta']);
-    $ajuste = floatval($_POST['ajuste']);
     
-    // Validar que no exista ajuste previo
-    $check = mysqli_query($link, "SELECT ajuste FROM respuesta_cotizacion WHERE idRespuesta = $idRespuesta AND ajuste = 0");
-    if (mysqli_num_rows($check) == 0) {
-        $mensaje = 'Error: Esta partida ya tiene un ajuste registrado. El ajuste es de una sola vez.';
-        $tipo_mensaje = 'danger';
-    } else {
-        $sql = "UPDATE respuesta_cotizacion SET 
-                ajuste = $ajuste,
-                ultima_actualizacion = CONVERT_TZ(NOW(),'UTC','America/Mexico_City'),
-                usuario_modifica = '$session_usuario'
-                WHERE idRespuesta = $idRespuesta";
+    // Guardar cabecera temporal (solo al iniciar)
+    elseif (isset($_POST['guardar_cabecera'])) {
+        $comentario = mysqli_real_escape_string($link, $_POST['comentario'] ?? '');
+        
+        $sql = "INSERT INTO cotizaciones_maestro 
+                (comentario, cerrada, activo, fecha_alta, ultima_actualizacion, usuario_alta, usuario_modifica) 
+                VALUES 
+                ('$comentario', 'no', 'si', 
+                 CONVERT_TZ(NOW(),'UTC','America/Mexico_City'), 
+                 CONVERT_TZ(NOW(),'UTC','America/Mexico_City'), 
+                 '$usuario_sanitizado', '$usuario_sanitizado')";
         
         if (mysqli_query($link, $sql)) {
-            $mensaje = 'Ajuste guardado correctamente.';
-            $tipo_mensaje = 'success';
+            $_SESSION['cotizacion_temp'] = mysqli_insert_id($link);
+            $mensaje = 'Cotización iniciada. Agregue las partidas.';
+            $tipo_mensaje = 'info';
         } else {
-            $mensaje = 'Error al guardar ajuste: ' . mysqli_error($link);
+            $mensaje = 'Error al iniciar cotización: ' . mysqli_error($link);
             $tipo_mensaje = 'danger';
+        }
+    }
+    
+    // Agregar partida - VERSIÓN ROBUSTA: hidden field + fallback a sesión
+    elseif (isset($_POST['agregar_partida'])) {
+        // PRIORIDAD 1: Campo hidden del formulario (más confiable en cPanel)
+        $idCotizacion_post = intval($_POST['idCotizacion_hidden'] ?? 0);
+        
+        // PRIORIDAD 2: Fallback a sesión si el hidden viene vacío
+        if ($idCotizacion_post == 0 && isset($_SESSION['cotizacion_temp'])) {
+            $idCotizacion_post = intval($_SESSION['cotizacion_temp']);
+        }
+        
+        // Validar que tengamos un ID válido
+        if ($idCotizacion_post == 0) {
+            $mensaje = 'Error: No hay cotización activa. Inicie una nueva cotización.';
+            $tipo_mensaje = 'danger';
+        } else {
+            $idCotizacion = $idCotizacion_post;
+            
+            // Mantener sincronizado por si la sesión se recuperó
+            $_SESSION['cotizacion_temp'] = $idCotizacion;
+            
+            $idArticulo = intval($_POST['idArticulo']);
+            $idUnidadMedida = mysqli_real_escape_string($link, $_POST['idUnidadMedida']);
+            $idIncoterm = mysqli_real_escape_string($link, $_POST['idIncoterm']);
+            $cantidad_solicitada = floatval($_POST['cantidad_solicitada']);
+            $fecha_requerida = mysqli_real_escape_string($link, $_POST['fecha_requerida']);
+            
+            $sql = "INSERT INTO cotizaciones_detalle 
+                    (idCotizacion, idArticulo, idUnidadMedida, idIncoterm, 
+                     cantidad_solicitada, cantidad_recibida, fecha_requerida, 
+                     comprar, cantidad_autorizada, activo, 
+                     fecha_alta, ultima_actualizacion, usuario_alta, usuario_modifica) 
+                    VALUES 
+                    ($idCotizacion, $idArticulo, '$idUnidadMedida', '$idIncoterm',
+                     $cantidad_solicitada, 0, '$fecha_requerida',
+                     'no', 0, 'si',
+                     CONVERT_TZ(NOW(),'UTC','America/Mexico_City'),
+                     CONVERT_TZ(NOW(),'UTC','America/Mexico_City'),
+                     '$usuario_sanitizado', '$usuario_sanitizado')";
+            
+            if (mysqli_query($link, $sql)) {
+                $mensaje = 'Partida agregada correctamente.';
+                $tipo_mensaje = 'success';
+            } else {
+                $mensaje = 'Error al agregar partida: ' . mysqli_error($link);
+                $tipo_mensaje = 'danger';
+            }
+        }
+    }
+    
+    // Eliminar partida - mismo enfoque robusto
+    elseif (isset($_POST['eliminar_partida'])) {
+        $idDetalle = intval($_POST['idDetalle']);
+        
+        // Intentar obtener de hidden primero, luego de sesión
+        $idCotizacion_post = intval($_POST['idCotizacion_hidden'] ?? 0);
+        if ($idCotizacion_post == 0 && isset($_SESSION['cotizacion_temp'])) {
+            $idCotizacion_post = intval($_SESSION['cotizacion_temp']);
+        }
+        
+        if ($idCotizacion_post > 0) {
+            $idCotizacion = $idCotizacion_post;
+            $sql = "UPDATE cotizaciones_detalle SET activo = 'no', 
+                    ultima_actualizacion = CONVERT_TZ(NOW(),'UTC','America/Mexico_City'),
+                    usuario_modifica = '$usuario_sanitizado'
+                    WHERE idDetalle = $idDetalle AND idCotizacion = $idCotizacion";
+            mysqli_query($link, $sql);
+            $mensaje = 'Partida eliminada.';
+            $tipo_mensaje = 'info';
+            $_SESSION['cotizacion_temp'] = $idCotizacion; // mantener sincronizado
         }
     }
 }
 
-$idCotizacion_sel = isset($_POST['idCotizacion']) ? intval($_POST['idCotizacion']) : 0;
+// Determinar estado actual - DESPUÉS de procesar POST
+$idCotizacion_temp = isset($_SESSION['cotizacion_temp']) ? intval($_SESSION['cotizacion_temp']) : null;
+$cotizacion_confirmada = false;
+
+// Verificar si la cotización temporal ya fue confirmada
+if ($idCotizacion_temp) {
+    $res = mysqli_query($link, "SELECT fecha_cotizacion FROM cotizaciones_maestro WHERE idCotizacion = $idCotizacion_temp");
+    if ($res && $row = mysqli_fetch_assoc($res)) {
+        if ($row['fecha_cotizacion'] != null) {
+            $cotizacion_confirmada = true;
+        }
+    }
+}
 ?>
 
 <div class="container-fluid">
     
+    <!-- Mensajes -->
+    <?php if ($mensaje): ?>
+    <div class="alert alert-<?php echo $tipo_mensaje; ?> alert-sistema">
+        <i class="fas fa-info-circle mr-2"></i> <?php echo $mensaje; ?>
+    </div>
+    <?php endif; ?>
+    
+    <!-- Cabecera -->
     <div class="card card-modulo mb-4">
         <div class="card-header">
-            <i class="fas fa-lock mr-2"></i> Cerrar Cotización
+            <i class="fas fa-file-invoice-dollar mr-2"></i> Crear Nueva Cotización <br />
+            <?php if ($idCotizacion_temp): ?>
+                <span class="badge badge-light float-right">Cotización #<?php echo $idCotizacion_temp; ?></span>
+            <?php endif; ?>
+            <div class="alert alert-info alert-sistema">
+<i class="fas fa-info-circle mr-2"></i>
+<strong>Consejo de Uso:</strong> Para evitar confusiones de datos, se recomienda procesar <strong>una cotización a la vez</strong> por navegador. Si requiere trabajar en dos simultáneamente, utilice navegadores diferentes (ej. Chrome y Firefox) o una ventana de incógnito.
+</div>
         </div>
         <div class="card-body">
             
-            <?php if ($mensaje): ?>
-            <div class="alert alert-<?php echo $tipo_mensaje; ?> alert-sistema">
-                <i class="fas fa-info-circle mr-2"></i> <?php echo $mensaje; ?>
-            </div>
+            <?php if (!$idCotizacion_temp): ?>
+                <!-- Formulario inicial de cabecera -->
+                <form method="POST" class="form-sistema">
+                    <div class="row">
+                        <div class="col-md-12">
+                            <div class="form-group">
+                                <label>Comentario General</label>
+                                <textarea name="comentario" class="form-control" rows="3" placeholder="Comentarios generales de la cotización..."></textarea>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="submit" name="guardar_cabecera" class="btn btn-guardar">
+                        <i class="fas fa-play mr-2"></i> Iniciar Cotización
+                    </button>
+                </form>
+                
+            <?php else: ?>
+                <!-- Cabecera guardada, mostrar datos -->
+                <?php
+                $res = mysqli_query($link, "SELECT * FROM cotizaciones_maestro WHERE idCotizacion = $idCotizacion_temp");
+                $cot = mysqli_fetch_assoc($res);
+                ?>
+                <div class="row">
+                    <div class="col-md-12">
+                        <p><strong>Comentario:</strong> <?php echo htmlspecialchars($cot['comentario']); ?></p>
+                        <?php if ($cotizacion_confirmada): ?>
+                            <div class="alert alert-warning alert-sistema">
+                                <i class="fas fa-lock mr-2"></i> Esta cotización ya fue confirmada. No se pueden agregar ni modificar partidas.
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
             <?php endif; ?>
             
-            <!-- Selección de Cotización -->
-            <form method="POST" class="form-sistema mb-4">
+        </div>
+    </div>
+    
+    <?php if ($idCotizacion_temp && !$cotizacion_confirmada): ?>
+    <!-- Sección de Partidas -->
+    <div class="card card-modulo mb-4">
+        <div class="card-header">
+            <i class="fas fa-list-ul mr-2"></i> Agregar Partidas
+        </div>
+        <div class="card-body">
+            
+            <form method="POST" class="form-sistema" id="formPartida">
+                <!-- CAMBIO CRÍTICO: Hidden field para cPanel/hospedaje compartido -->
+                <input type="hidden" name="idCotizacion_hidden" value="<?php echo $idCotizacion_temp; ?>">
+                
                 <div class="row">
-                    <div class="col-md-8">
+                    <div class="col-md-4">
                         <div class="form-group">
-                            <label>Cotización Abierta <span class="text-danger">*</span></label>
-                            <select name="idCotizacion" class="form-control custom-select" onchange="this.form.submit()" required>
-                                <option value="">Seleccione cotización...</option>
+                            <label>Artículo <span class="text-danger">*</span></label>
+                            <select name="idArticulo" class="form-control custom-select" required>
+                                <option value="">Seleccione...</option>
                                 <?php
-                                $res = mysqli_query($link, "SELECT idCotizacion, comentario, fecha_cotizacion 
-                                                            FROM cotizaciones_maestro 
-                                                            WHERE cerrada = 'no' AND activo = 'si' 
-                                                            ORDER BY idCotizacion DESC");
+                                $res = mysqli_query($link, "SELECT idArticulo, nombre FROM cat_articulos WHERE activo = 'si' ORDER BY nombre");
                                 while ($row = mysqli_fetch_assoc($res)) {
-                                    $selected = ($idCotizacion_sel == $row['idCotizacion']) ? 'selected' : '';
-                                    $fecha = $row['fecha_cotizacion'] ? date('d/m/Y', strtotime($row['fecha_cotizacion'])) : 'Sin confirmar';
-                                    echo '<option value="' . $row['idCotizacion'] . '" ' . $selected . '>
-                                            #' . $row['idCotizacion'] . ' - ' . $fecha . ' - ' . htmlspecialchars(substr($row['comentario'], 0, 50)) . '
-                                          </option>';
+                                    echo '<option value="' . $row['idArticulo'] . '">' . htmlspecialchars($row['nombre']) . '</option>';
                                 }
                                 ?>
                             </select>
                         </div>
                     </div>
+                    <div class="col-md-2">
+                        <div class="form-group">
+                            <label>Unidad de Medida <span class="text-danger">*</span></label>
+                            <select name="idUnidadMedida" class="form-control custom-select" required>
+                                <option value="">Seleccione...</option>
+                                <?php
+                                $res = mysqli_query($link, "SELECT idUnidadMedida, descripcion FROM cat_unidades_medida WHERE activo = 'si' ORDER BY descripcion");
+                                while ($row = mysqli_fetch_assoc($res)) {
+                                    echo '<option value="' . $row['idUnidadMedida'] . '">' . htmlspecialchars($row['idUnidadMedida'] . ' - ' . $row['descripcion']) . '</option>';
+                                }
+                                ?>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="form-group">
+                            <label>Incoterm <span class="text-danger">*</span></label>
+                            <select name="idIncoterm" class="form-control custom-select" required>
+                                <option value="">Seleccione...</option>
+                                <?php
+                                $res = mysqli_query($link, "SELECT idIncoterm, descripcion FROM cat_incoterms WHERE activo = 'si' ORDER BY idIncoterm");
+                                while ($row = mysqli_fetch_assoc($res)) {
+                                    echo '<option value="' . $row['idIncoterm'] . '">' . htmlspecialchars($row['idIncoterm'] . ' - ' . $row['descripcion']) . '</option>';
+                                }
+                                ?>
+                            </select>
+                            <small class="ayuda-campo">Obligatorio por partida</small>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="form-group">
+                            <label>Cantidad Solicitada <span class="text-danger">*</span></label>
+                            <input type="number" name="cantidad_solicitada" class="form-control" step="0.000001" min="0.000001" required>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="form-group">
+                            <label>Fecha Requerida <span class="text-danger">*</span></label>
+                            <input type="datetime-local" name="fecha_requerida" class="form-control" required>
+                        </div>
+                    </div>
                 </div>
+                <button type="submit" name="agregar_partida" class="btn btn-guardar">
+                    <i class="fas fa-plus mr-2"></i> Agregar Partida
+                </button>
             </form>
             
-            <?php if ($idCotizacion_sel): ?>
+        </div>
+    </div>
+    <?php endif; ?>
+    
+    <?php if ($idCotizacion_temp): ?>
+    <!-- Listado de Partidas -->
+    <div class="card card-modulo">
+        <div class="card-header">
+            <i class="fas fa-clipboard-list mr-2"></i> Partidas de la Cotización
+        </div>
+        <div class="card-body">
             
-            <!-- Resumen de Partidas con Ajustes -->
-            <h5 class="mb-3"><i class="fas fa-clipboard-check mr-2"></i> Partidas y Ajustes Finales</h5>
-            
-            <div class="table-responsive mb-4">
+            <div class="table-responsive">
                 <table class="table table-sistema">
                     <thead>
                         <tr>
-                            <th>Partida</th>
+                            <th>#</th>
                             <th>Artículo</th>
-                            <th>Proveedor</th>
-                            <th>Cantidad Autorizada</th>
-                            <th>Cantidad Recibida</th>
-                            <th>Ajuste Actual</th>
-                            <th>Acción</th>
+                            <th>Unidad</th>
+                            <th>Incoterm</th>
+                            <th>Cantidad Solicitada</th>
+                            <th>Fecha Requerida</th>
+                            <?php if (!$cotizacion_confirmada): ?>
+                            <th>Acciones</th>
+                            <?php endif; ?>
                         </tr>
                     </thead>
                     <tbody>
                         <?php
-                        $sql = "SELECT d.idDetalle, a.nombre as articulo_nombre,
-                                r.idRespuesta, r.idProveedor, r.cantidad_autorizada, r.ajuste,
-                                p.nombre as proveedor_nombre,
-                                SUM(d.cantidad_recibida) as total_recibido
+                        $sql = "SELECT d.*, a.nombre as articulo_nombre, u.descripcion as unidad_desc, i.descripcion as incoterm_desc
                                 FROM cotizaciones_detalle d
                                 JOIN cat_articulos a ON d.idArticulo = a.idArticulo
-                                JOIN respuesta_cotizacion r ON d.idDetalle = r.idDetalle AND r.activo = 'si' AND r.autorizado = 'si'
-                                JOIN cat_proveedores p ON r.idProveedor = p.idProveedor
-                                WHERE d.idCotizacion = $idCotizacion_sel AND d.activo = 'si'
-                                GROUP BY r.idRespuesta
+                                JOIN cat_unidades_medida u ON d.idUnidadMedida = u.idUnidadMedida
+                                JOIN cat_incoterms i ON d.idIncoterm = i.idIncoterm
+                                WHERE d.idCotizacion = $idCotizacion_temp AND d.activo = 'si'
                                 ORDER BY d.idDetalle";
                         $res = mysqli_query($link, $sql);
-                        
+                        $contador = 0;
                         while ($row = mysqli_fetch_assoc($res)) {
+                            $contador++;
                             echo '<tr>';
-                            echo '<td>' . $row['idDetalle'] . '</td>';
+                            echo '<td>' . $contador . '</td>';
                             echo '<td>' . htmlspecialchars($row['articulo_nombre']) . '</td>';
-                            echo '<td>' . htmlspecialchars($row['proveedor_nombre']) . '</td>';
-                            echo '<td>' . number_format($row['cantidad_autorizada'], 6) . '</td>';
-                            echo '<td>' . number_format($row['total_recibido'], 6) . '</td>';
-                            
-                            // Mostrar ajuste actual
-                            if ($row['ajuste'] > 0) {
-                                echo '<td class="text-warning font-weight-bold">
-                                        <i class="fas fa-exclamation-triangle mr-1"></i> +' . number_format($row['ajuste'], 6) . ' (excedente)
-                                      </td>';
-                            } elseif ($row['ajuste'] < 0) {
-                                echo '<td class="text-danger font-weight-bold">
-                                        <i class="fas fa-times-circle mr-1"></i> ' . number_format($row['ajuste'], 6) . ' (descontinuado)
-                                      </td>';
-                            } else {
-                                echo '<td class="text-muted">-</td>';
-                            }
-                            
-                            // Botón de ajuste si no tiene ajuste previo
-                            if ($row['ajuste'] == 0) {
+                            echo '<td>' . htmlspecialchars($row['idUnidadMedida']) . '</td>';
+                            echo '<td>' . htmlspecialchars($row['idIncoterm']) . '</td>';
+                            echo '<td>' . number_format($row['cantidad_solicitada'], 6) . '</td>';
+                            echo '<td>' . $row['fecha_requerida'] . '</td>';
+                            if (!$cotizacion_confirmada) {
                                 echo '<td>
-                                    <button type="button" class="btn btn-warning btn-sm" data-toggle="modal" data-target="#modalAjuste' . $row['idRespuesta'] . '">
-                                        <i class="fas fa-balance-scale mr-1"></i> Ajustar
-                                    </button>
+                                    <form method="POST" style="display:inline;">
+                                        <input type="hidden" name="idCotizacion_hidden" value="' . $idCotizacion_temp . '">
+                                        <input type="hidden" name="idDetalle" value="' . $row['idDetalle'] . '">
+                                        <button type="submit" name="eliminar_partida" class="btn btn-eliminar btn-sm">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </form>
                                 </td>';
-                            } else {
-                                echo '<td><span class="text-muted"><i class="fas fa-lock"></i> Fijado</span></td>';
                             }
-                            
                             echo '</tr>';
+                        }
+                        if ($contador == 0) {
+                            echo '<tr><td colspan="7" class="text-center text-muted">No hay partidas agregadas</td></tr>';
                         }
                         ?>
                     </tbody>
                 </table>
             </div>
             
-            <!-- Formulario de Cierre -->
-            <div class="card border-danger">
-                <div class="card-header bg-danger text-white">
-                    <i class="fas fa-lock mr-2"></i> Cierre Definitivo de Cotización
-                </div>
-                <div class="card-body">
-                    <form method="POST" id="formCierre">
-                        <input type="hidden" name="idCotizacion" value="<?php echo $idCotizacion_sel; ?>">
-                        
-                        <div class="form-group">
-                            <label>Motivo de Cierre <span class="text-danger">*</span></label>
-                            <textarea name="motivo_cierre" class="form-control" rows="3" required
-                                      placeholder="Explique por qué se cierra esta cotización..."></textarea>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label>¿Hubo incidencias? <span class="text-danger">*</span></label>
-                            <select name="hubo_incidencia" class="form-control custom-select" id="selectIncidencia" required onchange="toggleIncidencia()">
-                                <option value="no">No</option>
-                                <option value="si">Sí</option>
-                            </select>
-                        </div>
-                        
-                        <div class="form-group" id="divDescripcionIncidencia" style="display:none;">
-                            <label>Descripción de la Incidencia <span class="text-danger">*</span></label>
-                            <textarea name="descripcion_incidencia" class="form-control" rows="3"
-                                      placeholder="Describa la incidencia ocurrida..."></textarea>
-                        </div>
-                        
-                        <div class="alert alert-danger">
-                            <i class="fas fa-exclamation-triangle mr-2"></i>
-                            <strong>ADVERTENCIA:</strong> El cierre de cotización es <strong>IRREVERSIBLE</strong>. 
-                            Una vez cerrada no podrá recibir mercancía ni modificar ningún dato.
-                        </div>
-                        
-                        <button type="button" class="btn btn-danger btn-lg btn-block" data-toggle="modal" data-target="#modalConfirmarCierre">
-                            <i class="fas fa-lock mr-2"></i> Cerrar Cotización Definitivamente
-                        </button>
-                        
-                        <!-- Modal de Confirmación Final -->
-                        <div class="modal fade" id="modalConfirmarCierre" tabindex="-1" role="dialog" aria-hidden="true" data-backdrop="static">
-                            <div class="modal-dialog modal-dialog-centered" role="document">
-                                <div class="modal-content">
-                                    <div class="modal-header bg-danger text-white">
-                                        <h5 class="modal-title"><i class="fas fa-exclamation-triangle mr-2"></i> Confirmar Cierre Irreversible</h5>
-                                        <button type="button" class="close text-white" data-dismiss="modal" aria-label="Close">
-                                            <span aria-hidden="true">&times;</span>
-                                        </button>
-                                    </div>
-                                    <div class="modal-body">
-                                        <p class="lead">¿Está absolutamente seguro?</p>
-                                        <p>El cierre de cotización es <strong>IRREVERSIBLE</strong>. Una vez cerrada:</p>
-                                        <ul>
-                                            <li>No podrá recibir más mercancía</li>
-                                            <li>No podrá modificar cantidades ni ajustes</li>
-                                            <li>No podrá agregar nuevas respuestas de proveedor</li>
-                                            <li>Los ajustes registrados son permanentes</li>
-                                        </ul>
-                                    </div>
-                                    <div class="modal-footer">
-                                        <button type="button" class="btn btn-cancelar" data-dismiss="modal">Cancelar</button>
-                                        <button type="submit" name="confirmar_cierre" class="btn btn-danger">
-                                            <i class="fas fa-lock mr-2"></i> Sí, Cerrar Definitivamente
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        
-                    </form>
-                </div>
+            <?php if ($contador > 0 && !$cotizacion_confirmada): ?>
+            <hr class="separador-seccion">
+            <div class="text-center">
+                <button type="button" class="btn btn-guardar btn-lg" data-toggle="modal" data-target="#modalConfirmar">
+                    <i class="fas fa-check-circle mr-2"></i> Confirmar Cotización
+                </button>
             </div>
-            
             <?php endif; ?>
             
         </div>
     </div>
+    <?php endif; ?>
     
 </div>
 
-<!-- Modales de Ajuste -->
-<?php
-if ($idCotizacion_sel) {
-    $sql = "SELECT d.idDetalle, a.nombre as articulo_nombre,
-            r.idRespuesta, r.cantidad_autorizada, r.cantidad_cotizada,
-            p.nombre as proveedor_nombre
-            FROM cotizaciones_detalle d
-            JOIN cat_articulos a ON d.idArticulo = a.idArticulo
-            JOIN respuesta_cotizacion r ON d.idDetalle = r.idDetalle AND r.activo = 'si' AND r.autorizado = 'si' AND r.ajuste = 0
-            JOIN cat_proveedores p ON r.idProveedor = p.idProveedor
-            WHERE d.idCotizacion = $idCotizacion_sel AND d.activo = 'si'";
-    $res = mysqli_query($link, $sql);
-    
-    while ($row = mysqli_fetch_assoc($res)) {
-?>
-<div class="modal fade" id="modalAjuste<?php echo $row['idRespuesta']; ?>" tabindex="-1" role="dialog" aria-hidden="true">
-    <div class="modal-dialog" role="document">
+<!-- Modal de Confirmación -->
+<?php if ($idCotizacion_temp && !$cotizacion_confirmada): ?>
+<div class="modal fade" id="modalConfirmar" tabindex="-1" role="dialog" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered" role="document">
         <div class="modal-content">
-            <form method="POST">
-                <div class="modal-header bg-warning">
-                    <h5 class="modal-title">
-                        <i class="fas fa-balance-scale mr-2"></i> Registrar Ajuste
-                    </h5>
-                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                        <span aria-hidden="true">&times;</span>
+            <div class="modal-header bg-warning text-dark">
+                <h5 class="modal-title"><i class="fas fa-exclamation-triangle mr-2"></i> Confirmar Cotización</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-warning">
+                    <strong>Advertencia:</strong> Una vez confirmada la cotización <strong>NO</strong> podrá:
+                    <ul class="mb-0 mt-2">
+                        <li>Agregar más partidas</li>
+                        <li>Modificar cantidades solicitadas</li>
+                        <li>Cambiar condiciones de las partidas</li>
+                    </ul>
+                </div>
+                <p class="mb-0">¿Desea continuar con la confirmación?</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-cancelar" data-dismiss="modal">Cancelar</button>
+                <form method="POST" style="display:inline;">
+                    <input type="hidden" name="idCotizacion_temp" value="<?php echo $idCotizacion_temp; ?>">
+                    <button type="submit" name="confirmar_cotizacion" class="btn btn-guardar">
+                        <i class="fas fa-check mr-2"></i> Sí, Confirmar
                     </button>
-                </div>
-                <div class="modal-body">
-                    
-                    <input type="hidden" name="idRespuesta" value="<?php echo $row['idRespuesta']; ?>">
-                    <input type="hidden" name="idCotizacion" value="<?php echo $idCotizacion_sel; ?>">
-                    
-                    <div class="form-group">
-                        <label>Artículo</label>
-                        <input type="text" class="form-control" value="<?php echo htmlspecialchars($row['articulo_nombre']); ?>" readonly>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label>Proveedor</label>
-                        <input type="text" class="form-control" value="<?php echo htmlspecialchars($row['proveedor_nombre']); ?>" readonly>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label>Cantidad Autorizada</label>
-                        <input type="text" class="form-control" value="<?php echo number_format($row['cantidad_autorizada'], 6); ?>" readonly>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label>Ajuste <span class="text-danger">*</span></label>
-                        <input type="number" name="ajuste" class="form-control" step="0.000001" required>
-                        <small class="ayuda-campo">
-                            <span class="text-success">+Valor</span> = recibimos de más (excedente)<br>
-                            <span class="text-danger">-Valor</span> = descontinuado/producto faltante
-                        </small>
-                    </div>
-                    
-                    <div class="alert alert-warning">
-                        <i class="fas fa-exclamation-triangle mr-2"></i>
-                        El ajuste es de <strong>UNA SOLA VEZ</strong> e irreversible.
-                    </div>
-                    
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-cancelar" data-dismiss="modal">Cancelar</button>
-                    <button type="submit" name="guardar_ajuste" class="btn btn-warning">
-                        <i class="fas fa-save mr-2"></i> Guardar Ajuste
-                    </button>
-                </div>
-            </form>
+                </form>
+            </div>
         </div>
     </div>
 </div>
-<?php 
-    }
-}
-?>
-
-<script>
-function toggleIncidencia() {
-    var select = document.getElementById('selectIncidencia');
-    var div = document.getElementById('divDescripcionIncidencia');
-    div.style.display = (select.value == 'si') ? 'block' : 'none';
-}
-</script>
+<?php endif; ?>
 
 </div>
 
