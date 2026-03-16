@@ -158,7 +158,7 @@ Es posible que los resultados devuelvan valores `NULL` si las tablas de zona hor
 
 Para asegurar la integridad de los registros de autorización, se recomienda verificar la disponibilidad de estas tablas o instalarlas ejecutando el siguiente comando en la terminal del servidor (Linux):
 
-```bash
+**bash :**
 mysql_tzinfo_to_sql /usr/share/zoneinfo | mysql -u root -p mysql
 
 ---
