@@ -1,6 +1,6 @@
 <?php
 /**
- * 🕵️ Sincronizador de Alta Seguridad - Proyecto Lemkotir
+ * 🕵️ Sincronizador de Alta Seguridad - Proyecto Maltir
  * Autodetector de Dominio, Ruta y Doble Validación Estricta
  * Licencia Mit
  * Autor: Alfonso Orozco Aguilar
