@@ -67,8 +67,7 @@ $existe_wallpaper = file_exists($wallpaper);
     <!-- Bootstrap 4.6 CSS -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css">
     <!-- Font Awesome 5 -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
-    
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css" crossorigin="anonymous">    
     <style>
         body, html {
             height: 100%;
@@ -303,6 +302,5 @@ $existe_wallpaper = file_exists($wallpaper);
         }, false);
     })();
 </script>
-
 </body>
 </html>
