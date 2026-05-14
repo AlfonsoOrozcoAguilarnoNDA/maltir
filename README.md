@@ -50,7 +50,17 @@ Evaluar si **Kimi 2.5 web** puede:
 3. Generar código PHP procedural funcional y coherente entre módulos
 4. Implementar lógica de negocio no trivial con restricciones irreversibles
 
-Se haran cambios necesarios encódigo y se documentaran en vibecodingmexico.com
+Se haran cambios necesarios en código y se documentaran en vibecodingmexico.com
+---
+## Problema temporal
+
+La degradación de modelos de LLM deja de momento desde el 20 de marzo 2026
+aproximadamente a Kimi como la unica inteligencia real confiable , que no sea Claude.
+El experimento se pone den pausa el 21 de Abril de 2026 debido a que se requiere
+Kimi para ser coherente, pero se reservar para casos de la vida real.
+
+Es **gestión de recursos** no abandono de proyecto. Se retomará mas adelante.
+
 ---
 
 ## ⚙️ Especificaciones Técnicas
