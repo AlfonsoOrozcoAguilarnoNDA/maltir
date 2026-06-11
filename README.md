@@ -56,8 +56,13 @@ Se haran cambios necesarios en código y se documentaran en vibecodingmexico.com
 
 La degradación de modelos de LLM deja de momento desde el 20 de marzo 2026
 aproximadamente a Kimi como la unica inteligencia real confiable , que no sea Claude.
-El experimento se pone den pausa el 21 de Abril de 2026 debido a que se requiere
-Kimi para ser coherente, pero se reservar para casos de la vida real.
+El experimento se pone den pausa el 21 de Abril de 2026 debido a que en ese momento
+se requiere Kimi para ser coherente por ser la unia FIable de las LLM, situación que 
+sigue el 10 de junio de 2026. No se niega la capacidad de Kimi pero se reserva para
+casos de la vida real.
+
+Además hay problemas mencionados en vibecodingmexico.com sobre uso de agentes en LLM
+en general, queremos usar solo el modo chat o web.
 
 Es **gestión de recursos** no abandono de proyecto. Se retomará mas adelante.
 
