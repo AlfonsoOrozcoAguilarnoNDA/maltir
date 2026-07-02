@@ -1,0 +1,147 @@
+# ============================================
+# .htaccess - Bloqueo de indexación y bots
+# ============================================
+
+# --------------------------------------------------
+# 1. DESACTIVAR LA LISTA DE DIRECTORIOS
+# Si no hay un index.php/html, no muestres el contenido de la carpeta
+# --------------------------------------------------
+Options -Indexes
+
+# --------------------------------------------------
+# 2. EVITAR QUE SE SIGAN LOS ENLACES SIMBÓLICOS
+# Medida de seguridad adicional
+# --------------------------------------------------
+Options +FollowSymLinks
+Options -SymLinksIfOwnerMatch
+
+# --------------------------------------------------
+# 3. OCULTAR LA FIRMA DEL SERVIDOR
+# Evita que Apache revele su versión en errores
+# --------------------------------------------------
+ServerSignature Off
+
+# --------------------------------------------------
+# 4. ENCABEZADOS HTTP ANTI-INDEXACIÓN
+# Indica a navegadores y motores de búsqueda que NO indexen
+# --------------------------------------------------
+<IfModule mod_headers.c>
+    # X-Robots-Tag: noindex, nofollow (para Google, Bing, etc.)
+    Header set X-Robots-Tag "noindex, nofollow, noarchive, nosnippet, noimageindex"
+    
+    # Evitar que se guarde en caché de proxies
+    Header set Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
+</IfModule>
+
+# --------------------------------------------------
+# 5. BLOQUEO DE BOTS POR USER-AGENT (RewriteEngine)
+# Lista de los bots/spiders más comunes y agresivos
+# --------------------------------------------------
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    
+    # --- Motores de búsqueda principales ---
+    RewriteCond %{HTTP_USER_AGENT} Googlebot [NC,OR]
+    RewriteCond %{HTTP_USER_AGENT} bingbot [NC,OR]
+    RewriteCond %{HTTP_USER_AGENT} Slurp [NC,OR]          # Yahoo
+    RewriteCond %{HTTP_USER_AGENT} DuckDuckBot [NC,OR]
+    RewriteCond %{HTTP_USER_AGENT} Baiduspider [NC,OR]
+    RewriteCond %{HTTP_USER_AGENT} YandexBot [NC,OR]
+    
+    # --- Bots de SEO y scraping ---
+    RewriteCond %{HTTP_USER_AGENT} AhrefsBot [NC,OR]
+    RewriteCond %{HTTP_USER_AGENT} SemrushBot [NC,OR]
+    RewriteCond %{HTTP_USER_AGENT} MJ12bot [NC,OR]        # Majestic
+    RewriteCond %{HTTP_USER_AGENT) DotBot [NC,OR]         # Moz/OpenSiteExplorer
+    RewriteCond %{HTTP_USER_AGENT} rogerbot [NC,OR]       # Moz
+    RewriteCond %{HTTP_USER_AGENT} Screaming [NC,OR]      # Screaming Frog
+    
+    # --- Bots de IA y scraping masivo ---
+    RewriteCond %{HTTP_USER_AGENT} GPTBot [NC,OR]
+    RewriteCond %{HTTP_USER_AGENT} ChatGPT-User [NC,OR]
+    RewriteCond %{HTTP_USER_AGENT} ClaudeBot [NC,OR]
+    RewriteCond %{HTTP_USER_AGENT} PerplexityBot [NC,OR]
+    RewriteCond %{HTTP_USER_AGENT} CCBot [NC,OR]          # Common Crawl
+    RewriteCond %{HTTP_USER_AGENT} anthropic [NC,OR]
+    
+    # --- Herramientas de scraping ---
+    RewriteCond %{HTTP_USER_AGENT} Scrapy [NC,OR]
+    RewriteCond %{HTTP_USER_AGENT} curl [NC,OR]
+    RewriteCond %{HTTP_USER_AGENT} Wget [NC,OR]
+    RewriteCond %{HTTP_USER_AGENT} Python-urllib [NC,OR]
+    RewriteCond %{HTTP_USER_AGENT} libwww [NC,OR]
+    RewriteCond %{HTTP_USER_AGENT} HttpClient [NC,OR]
+    RewriteCond %{HTTP_USER_AGENT} Java [NC,OR]
+    RewriteCond %{HTTP_USER_AGENT} Go-http-client [NC,OR]
+    
+    # --- Bots maliciosos conocidos ---
+    RewriteCond %{HTTP_USER_AGENT} PetalBot [NC,OR]
+    RewriteCond %{HTTP_USER_AGENT} Bytespider [NC,OR]
+    RewriteCond %{HTTP_USER_AGENT} DataForSeoBot [NC,OR]
+    RewriteCond %{HTTP_USER_AGENT} Amazonbot [NC,OR]
+    RewriteCond %{HTTP_USER_AGENT} FacebookBot [NC,OR]
+    RewriteCond %{HTTP_USER_AGENT} Applebot [NC,OR]
+    
+    # --- El último NO lleva OR ---
+    RewriteCond %{HTTP_USER_AGENT} crawler [NC]
+    
+    # --- ACCIÓN: Devolver 403 Forbidden ---
+    RewriteRule .* - [F,L]
+</IfModule>
+
+# --------------------------------------------------
+# 6. BLOQUEO ADICIONAL CON DENY (método alternativo)
+# Para servidores que no usan mod_rewrite
+# --------------------------------------------------
+<IfModule mod_setenvif.c>
+    # Marcar user-agents sospechosos
+    BrowserMatchNoCase Googlebot bad_bot
+    BrowserMatchNoCase bingbot bad_bot
+    BrowserMatchNoCase Slurp bad_bot
+    BrowserMatchNoCase Baiduspider bad_bot
+    BrowserMatchNoCase AhrefsBot bad_bot
+    BrowserMatchNoCase SemrushBot bad_bot
+    BrowserMatchNoCase MJ12bot bad_bot
+    BrowserMatchNoCase GPTBot bad_bot
+    BrowserMatchNoCase ClaudeBot bad_bot
+    BrowserMatchNoCase CCBot bad_bot
+    BrowserMatchNoCase curl bad_bot
+    BrowserMatchNoCase wget bad_bot
+    BrowserMatchNoCase scrapy bad_bot
+    
+    <RequireAll>
+        Require all granted
+        Require not env bad_bot
+    </RequireAll>
+</IfModule>
+
+# --------------------------------------------------
+# 7. PROTEGER ARCHIVOS SENSIBLES
+# Evita el acceso directo a configuraciones y logs
+# --------------------------------------------------
+<FilesMatch "^\.">
+    # Bloquear archivos ocultos (.env, .git, .htaccess, etc.)
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+<FilesMatch "(^#.*#|\.(bak|config|dist|fla|inc|ini|log|psd|sh|sql|sw[op])|~)$">
+    # Bloquear backups, configs, logs, etc.
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# --------------------------------------------------
+# 8. ROBOTS.TXT VIRTUAL (opcional)
+# Si no tienes robots.txt físico, puedes servir uno
+# --------------------------------------------------
+<IfModule mod_rewrite.c>
+    RewriteCond %{REQUEST_URI} ^/robots\.txt$
+    RewriteRule ^robots\.txt$ - [L]
+</IfModule>
+
+# NOTA: Crea también un archivo robots.txt físico con:
+# User-agent: *
+# Disallow: /
